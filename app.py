@@ -1,4 +1,6 @@
 """Farmers Grain Co of Dorans (Mattoon, IL) - origination portal. Production, CN rail FOB and CN seasonals for one location."""
+import os
+
 import streamlit as st
 
 import cn_seasonals
@@ -6,6 +8,14 @@ import competitors
 import cn_sheet
 import processors
 import production
+
+for _k in ("USE_SNOWFLAKE", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_ROLE", "SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_PRIVATE_KEY",
+           "SNOWFLAKE_PRIVATE_KEY_PWD", "EIA_API_KEY"):          # Cloud secrets -> environment, where the vendored readers look
+    try:
+        if _k in st.secrets and _k not in os.environ:
+            os.environ[_k] = str(st.secrets[_k])
+    except Exception:
+        pass
 
 st.set_page_config(page_title="Dorans Origination Portal", page_icon="🌽", layout="wide")
 st.markdown("""<style>
