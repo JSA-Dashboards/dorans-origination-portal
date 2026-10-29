@@ -142,6 +142,18 @@ def week_label(w: int) -> str:
     return d.strftime("%b %d").replace(" 0", " ")
 
 
+def trucking() -> dict:
+    return json.loads((Path(__file__).parent / "data" / "trucking.json").read_text(encoding="utf-8"))
+
+
+def truck_options(tr: dict, tab: str, crop: str) -> list:
+    """[(carrier, cents/bu)] to the destination a processor tab sits at, cheapest first. Fairmont City, Cargill and ADM St. Louis share the
+    'St. Louis' rate (the sheet has one St. Louis line; Cahokia has its own)."""
+    dest = tr["tab_destination"].get(tab)
+    out = [(c, rates[dest][crop]) for c, rates in tr["carriers"].items() if dest in rates and crop in rates[dest]]
+    return sorted(out, key=lambda t: t[1])
+
+
 def render() -> None:
     import plotly.graph_objects as go
     import streamlit as st
@@ -149,10 +161,19 @@ def render() -> None:
     hist, note = load()
     if note:
         st.warning(note)
+    tr = trucking()
+    import pandas as pd
+    rows = [{"Carrier": c, "Destination": d, "Corn (¢/bu)": r.get("Corn"), "Soybeans (¢/bu)": r.get("Soybeans")}
+            for c, dests in tr["carriers"].items() for d, r in dests.items()]
+    with st.expander("Trucking rates from Dorans"):
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.caption("St. Louis applies to ADM, Cargill and Bunge Fairmont City (the sheet has one St. Louis line). Netted back = the latest nearby basis less the cheapest truck rate.")
     tabs = st.tabs([p[0] for p in PROCESSORS])
     for tab, (label, key, crops, note) in zip(tabs, PROCESSORS):
         with tab:
             st.caption(note)
+            if tr["tab_destination"].get(label) is None:
+                st.caption("No trucking rate on the sheet for this destination.")
             for crop in crops:
                 ser = daily_series(hist, key, crop)
                 if not ser:
@@ -178,6 +199,17 @@ def render() -> None:
                 st.plotly_chart(fig, use_container_width=True)
                 first = ser[0][0]
                 spot = any(r[3] for rows in hist[key][crop].values() for r in rows)
+                opts = truck_options(tr, label, crop)
+                if opts:
+                    best = opts[0]
+                    last_v = ser[-1][1]
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Latest nearby basis", f"{last_v:+.0f}¢", f"as of {ser[-1][0]:%b %d}", delta_color="off")
+                    c2.metric("Truck from Dorans", f"{best[1]}¢", best[0] + (f" (+{opts[1][0]} {opts[1][1]}¢)" if len(opts) > 1 else ""), delta_color="off")
+                    c3.metric("Netted back to Dorans", f"{last_v - best[1]:+.0f}¢", "basis less the cheapest truck", delta_color="off")
+                    dest = tr["tab_destination"][label]
+                    if dest in tr["notes"] and crop == "Soybeans":
+                        st.caption(tr["notes"][dest])
                 st.caption(f"Lines: the last six years with data. {len(ser):,} posted days, {first:%b %Y} to {ser[-1][0]:%b %d, %Y}. "
                            + ("Spot bid." if spot else "Earliest futures month quoted that day (no spot bid posted).")
                            + (" History only goes back this far in the archive, so there is no seasonal pattern to read yet." if (date.today() - first).days < 500 else ""))

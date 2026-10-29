@@ -1,0 +1,8 @@
+{"unit": "cents per bushel, Dorans to the destination (Kolten's trucking sheet, 2026-10-29; contacts deliberately not stored here: the repo is public)",
+ "carriers": {
+  "3 Sisters Trucking": {"St. Louis": {"Corn": 46, "Soybeans": 46}},
+  "Devon Warren": {"St. Louis": {"Corn": 45, "Soybeans": 45}, "Decatur": {"Corn": 29, "Soybeans": 30},
+                   "Incobrasa": {"Soybeans": 44}, "Cahokia": {"Corn": 45, "Soybeans": 46}}},
+ "notes": {"Incobrasa": "The sheet shows -0.44; read as a 44 cent cost, like every other line. Confirm."},
+ "tab_destination": {"ADM Decatur": "Decatur", "Primient Decatur": "Decatur", "ADM St. Louis": "St. Louis", "Cargill St. Louis": "St. Louis",
+                     "Bunge Fairmont City": "St. Louis", "CGB Cahokia": "Cahokia", "Incobrasa": "Incobrasa"}}
