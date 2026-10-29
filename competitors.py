@@ -33,25 +33,38 @@ def render() -> None:
     me, rows = d["dorans"], d["rows"]
     prod, geo = production.load_prod(), production.load_geo()
 
-    c1, c2, c3 = st.columns([1, 1.3, 1.3])
-    under = c1.selectbox("County shading", ["None", "Corn", "Soybeans"], key="comp_under")
-    show_c = c2.checkbox("Candidates from the shipper / plant lists", True, key="comp_cand")
-    rings = c3.multiselect("Distance rings (miles)", [15, 25, 50], default=[25], key="comp_rings")
+    c1, c2, c3, c4 = st.columns([1.3, 1.2, 1.4, 1.2])
+    under = c1.selectbox("County production layer", ["Corn", "Soybeans", "Corn + soybeans", "None"], key="comp_under")
+    last = production.years_of(prod, "Corn")[-1]
+    est = production.estimate_year(prod, "Corn")
+    yopts = [f"{last} (latest)", f"5-year average ({last - 4}-{last})"] + ([f"{est} (forecast)"] if est else [])
+    ysel = c2.selectbox("Production year", yopts, key="comp_year")
+    show_c = c3.checkbox("Candidates from the shipper / plant lists", True, key="comp_cand")
+    rings = c4.multiselect("Distance rings (miles)", [15, 25, 50], default=[25], key="comp_rings")
+    years = list(range(last - 4, last + 1)) if ysel.startswith("5-year") else [est] if "forecast" in ysel else [last]
+
+    def prod_by(crop):
+        return {r["fips"]: r["production"] for r in production.county_rows(prod, geo, crop, years)}
 
     fig = go.Figure()
-    fig.add_trace(go.Choropleth(geojson=geo, locations=[f["id"] for f in geo["features"]], z=[0] * len(geo["features"]), showscale=False,
-                                colorscale=[[0, "#f4f6f8"], [1, "#f4f6f8"]], marker_line_color="#c9d1d9", marker_line_width=0.6,
-                                hoverinfo="skip"))
+    fips_all = [f["id"] for f in geo["features"]]
+    fig.add_trace(go.Choropleth(geojson=geo, locations=fips_all, z=[0] * len(fips_all), showscale=False, colorscale=[[0, "#f4f6f8"], [1, "#f4f6f8"]],
+                                marker_line_color="#c9d1d9", marker_line_width=0.6, hoverinfo="skip"))
     if under != "None" and prod:
-        rows_c = production.county_rows(prod, geo, under, list(range(production.years_of(prod, under)[-1] - 4,
-                                                                       production.years_of(prod, under)[-1] + 1)))
-        val = {r["fips"]: r["production"] for r in rows_c}
+        corn, soy = prod_by("Corn"), prod_by("Soybeans")
+        val = ({f: corn.get(f) for f in fips_all} if under == "Corn" else {f: soy.get(f) for f in fips_all} if under == "Soybeans"
+               else {f: (corn.get(f) or 0) + (soy.get(f) or 0) for f in fips_all})
+        nm = {r["fips"]: r["county"] for r in production.county_rows(prod, geo, "Corn", [last])}
         fig.data = ()
-        fig.add_trace(go.Choropleth(geojson=geo, locations=[f["id"] for f in geo["features"]],
-                                    z=[val.get(f["id"]) for f in geo["features"]], colorscale=[[0, "#eaf4fd"], [1, "#0b4f8a"]],
-                                    marker_line_color="#ffffff", marker_line_width=0.5, colorbar=dict(title=f"{under} bu<br>5-yr avg", thickness=10),
-                                    hovertemplate="%{text}<br>%{z:,.0f} bu<extra></extra>",
-                                    text=[(next((r["county"] for r in rows_c if r["fips"] == f["id"]), "") + " County") for f in geo["features"]]))
+        fig.add_trace(go.Choropleth(
+            geojson=geo, locations=fips_all, z=[val.get(f) for f in fips_all], colorscale=[[0, "#eaf4fd"], [0.5, "#7fb6e3"], [1, "#0b4f8a"]],
+            marker_line_color="#ffffff", marker_line_width=0.5, colorbar=dict(title=f"{under}<br>bu, {ysel.split(' (')[0]}", thickness=10),
+            customdata=[[nm.get(f, ""), corn.get(f) or 0, soy.get(f) or 0] for f in fips_all],
+            hovertemplate="<b>%{customdata[0]} County</b><br>Corn %{customdata[1]:,.0f} bu<br>Soybeans %{customdata[2]:,.0f} bu<extra></extra>"))
+        cent = {f["id"]: (f["properties"]["lon"], f["properties"]["lat"]) for f in geo["features"]}
+        lab = [(cent[f], val[f]) for f in fips_all if val.get(f)]
+        fig.add_trace(go.Scattergeo(lon=[c[0][0] for c in lab], lat=[c[0][1] for c in lab], mode="text", text=[f"{v / 1e6:.1f}" for _, v in lab],
+                                    textfont=dict(size=9, color="#374151"), hoverinfo="skip", showlegend=False))
     for m in rings:
         pts = ring(me["lat"], me["lon"], m)
         fig.add_trace(go.Scattergeo(lon=[p[0] for p in pts], lat=[p[1] for p in pts], mode="lines", line=dict(color="#32373c", width=1, dash="dot"),
@@ -83,7 +96,8 @@ def render() -> None:
     st.plotly_chart(fig, use_container_width=True)
 
     unplaced = [r["name"] for r in rows if r["lat"] is None]
-    st.caption("Red = the elevators you named; orange = every other elevator within 30 miles that posts a bid in the basis tracker (the truck-delivered "
+    st.caption(f"County labels: {under.lower()} production in M bu ({ysel}), withheld counties filled the same way as the IL Production tab. "
+               "Red = the elevators you named; orange = every other elevator within 30 miles that posts a bid in the basis tracker (the truck-delivered "
                "competition, from its pins); grey = candidates from the BNSF / CSX / NS / CN / UP shipper directories and the crush and ethanol lists "
                "within 45 miles (a rail-shipper entry is a loading elevator, not proof it bids for the same grain). Primient Coles, Primient Mattoon and ADM Sullivan are placed from their street addresses; the other pins are the basis tracker's."
                + (f" Not pinned, no coordinates yet: {', '.join(unplaced)}." if unplaced else ""))

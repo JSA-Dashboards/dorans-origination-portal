@@ -17,14 +17,19 @@ for _k in ("USE_SNOWFLAKE", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_RO
     except Exception:
         pass
 
-st.set_page_config(page_title="Dorans Origination Portal", page_icon="🌽", layout="wide")
+st.set_page_config(page_title="Dorans Merchandising Portal", page_icon="🌽", layout="wide")
 st.markdown("""<style>
 html, body, [class*="css"], h1, h2, h3, h4 { font-family: "Source Sans Pro", system-ui, sans-serif; }
 .dash-header { text-align:center; padding:10px 0 12px; border-bottom:3px solid #0693e3; margin-bottom:14px; }
 .dash-header h1 { margin:0; font-size:1.7rem; color:#32373c; }
 .dash-header p { margin:2px 0 0; color:#6b7280; font-size:0.95rem; }
 </style>
-<div class="dash-header"><h1>Dorans Origination Portal</h1><p>Farmers Grain Co of Dorans · Mattoon, IL</p></div>""", unsafe_allow_html=True)
+<div class="dash-header"><h1>Dorans Merchandising Portal</h1><p>Farmers Grain Co of Dorans · Mattoon, IL</p></div>""", unsafe_allow_html=True)
+
+st.markdown(
+    "<p style='text-align:center;color:#6b7280;font-size:0.78rem;margin:-6px 0 8px 0'>Basis, processor and rail bids come from the "
+    "<a href='https://basis-tracker-view.streamlit.app' target='_blank'>Basis Tracker view</a> data only: the same archive and the same hidden markets "
+    "the view build shows.</p>", unsafe_allow_html=True)
 
 tab_prod, tab_comp, tab_proc, tab_cn, tab_seas = st.tabs(["🌽 IL Production", "📍 Competition", "🏭 Processors", "🚂 CN Rail FOB", "📈 CN Seasonals"])
 with tab_prod:

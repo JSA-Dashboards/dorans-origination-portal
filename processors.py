@@ -11,6 +11,8 @@ import re
 from datetime import date
 from pathlib import Path
 
+import periods as PER
+
 DATA = Path(__file__).parent / "data" / "processors_history.json"
 # tab label -> (key in the history file, crops to show, location note)
 PROCESSORS = [
@@ -154,6 +156,103 @@ def truck_options(tr: dict, tab: str, crop: str) -> list:
     return sorted(out, key=lambda t: t[1])
 
 
+def destinations(hist: dict, crop: str) -> dict:
+    """{tab label: (as-of day, {month: (basis, futures symbol)})} for every buyer that posts a `crop` bid, from each one's latest posted day."""
+    out = {}
+    for label, key, crops, _ in PROCESSORS:
+        days = hist.get(key, {}).get(crop) if crop in crops else None
+        if not days:
+            continue
+        d = max(days)
+        bm = PER.by_month(days[d])
+        if bm:
+            out[label] = (d, bm)
+    return out
+
+
+def summary_rows(dest: dict, tr: dict, crop: str, view: str, today: date, n_months: int = 9) -> tuple:
+    """(row labels, columns, skipped): rows = the next n_months delivery months; one column per destination with a bid; `view` 'Delivered' = the bid as
+    posted, 'FOB Dorans' = the bid less the cheapest truck rate from Dorans (a destination with no trucking rate is skipped). Cells are (value, futures symbol)."""
+    months = []
+    y, m = today.year, today.month
+    for _ in range(n_months):
+        months.append((y, m))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    rows = [f"{PER.MONTHS[m - 1]} {str(y)[-2:]}" for y, m in months]
+    cols, skipped = [], []
+    for label, (asof, bm) in dest.items():
+        cents = 0
+        if view == "FOB Dorans":
+            opts = truck_options(tr, label, crop)
+            if not opts:
+                skipped.append(label)
+                continue
+            cents = opts[0][1]
+        cells = [(bm[m][0] - cents, bm[m][1]) if m in bm else None for _, m in months]
+        cols.append({"label": label, "asof": asof, "cells": cells, "truck": cents})
+    return rows, cols, skipped
+
+
+_SUM_CSS = """<style>
+table.sum{width:100%;border-collapse:collapse;font-size:.85rem}
+table.sum th{font-size:.7rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:7px 10px;border-bottom:2px solid #e2e8f0;text-align:center;white-space:nowrap}
+table.sum th small{display:block;font-weight:400;text-transform:none;letter-spacing:0;color:#9aa5b1}
+table.sum td{padding:6px 10px;text-align:center;border-bottom:1px solid #f1f1f1;color:#333;white-space:nowrap;font-variant-numeric:tabular-nums}
+table.sum td.lbl{text-align:left;font-weight:600;color:#2c3e50}
+table.sum td.best{background:#eaf4fc;font-weight:700}
+table.sum td.neg{color:#c00000}
+table.sum td.stale{opacity:.55}
+table.sum .fut{display:block;font-size:.65rem;color:#9aa5b1;font-weight:400}
+.sumwrap{border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.08);padding:8px;overflow-x:auto;background:#fff;margin:6px 0}
+</style>"""
+
+
+def summary_html(rows: list, cols: list, today: date) -> str:
+    h = ['<div class="sumwrap"><table class="sum"><tbody><tr><th style="text-align:left">Delivery</th>']
+    for c in cols:
+        stale = (today - date.fromisoformat(c["asof"])).days > 5
+        h.append(f'<th>{c["label"]}<small>{date.fromisoformat(c["asof"]):%b %d}{" · stale" if stale else ""}</small></th>')
+    h.append("</tr>")
+    for i, label in enumerate(rows):
+        vals = [c["cells"][i][0] if c["cells"][i] else None for c in cols]
+        top = max((v for v in vals if v is not None), default=None)
+        h.append(f'<tr><td class="lbl">{label}</td>')
+        for c, v in zip(cols, vals):
+            stale = (today - date.fromisoformat(c["asof"])).days > 5
+            if v is None:
+                h.append("<td>—</td>")
+                continue
+            cls = ("best " if v == top and sum(x is not None for x in vals) > 1 else "") + ("neg " if v < 0 else "") + ("stale" if stale else "")
+            sym = c["cells"][i][1]
+            h.append(f'<td class="{cls.strip()}">{v:+.0f}<span class="fut">{sym}</span></td>')
+        h.append("</tr>")
+    h.append("</tbody></table></div>")
+    return _SUM_CSS + "".join(h)
+
+
+def render_summary(hist: dict, tr: dict) -> None:
+    import streamlit as st
+    c1, c2 = st.columns([1, 1.4])
+    crop = c1.radio("Commodity", ["Corn", "Soybeans"], horizontal=True, key="proc_sum_crop")
+    view = c2.radio("View", ["Delivered bids", "FOB Dorans"], horizontal=True, key="proc_sum_view",
+                    help="Delivered = the bid as the buyer posts it. FOB Dorans = that bid less the cheapest truck rate from Dorans to the buyer.")
+    dest = destinations(hist, crop)                                       # only buyers that actually post a bid for this commodity
+    names = list(dest)
+    picked = st.multiselect("Destinations", names, default=names, key=f"proc_sum_dest_{crop}")
+    chosen = {k: v for k, v in dest.items() if k in picked}
+    today = date.today()
+    rows, cols, skipped = summary_rows(chosen, tr, crop, "FOB Dorans" if view == "FOB Dorans" else "Delivered", today)
+    if not cols:
+        st.info("Pick at least one destination." if not chosen else "None of the picked destinations has a trucking rate from Dorans.")
+        return
+    st.markdown(summary_html(rows, cols, today), unsafe_allow_html=True)
+    st.caption(("Basis in cents against the futures month shown under each bid (each buyer quotes its own month, so read down a column more than across). "
+                if view == "Delivered bids" else
+                "Basis less the cheapest truck rate from Dorans, cents/bu; the futures month is the buyer's. ") +
+               "Blue = the best bid in that delivery month. A month with a full bid uses it; with none, the FH / LH midpoint. Faded = last posted more than 5 days ago."
+               + (f" No trucking rate on the sheet for: {', '.join(skipped)}." if skipped else ""))
+
+
 def render() -> None:
     import plotly.graph_objects as go
     import streamlit as st
@@ -168,8 +267,10 @@ def render() -> None:
     with st.expander("Trucking rates from Dorans"):
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         st.caption("St. Louis applies to ADM, Cargill and Bunge Fairmont City (the sheet has one St. Louis line). Netted back = the latest nearby basis less the cheapest truck rate.")
-    tabs = st.tabs([p[0] for p in PROCESSORS])
-    for tab, (label, key, crops, note) in zip(tabs, PROCESSORS):
+    tabs = st.tabs(["📊 Summary"] + [p[0] for p in PROCESSORS])
+    with tabs[0]:
+        render_summary(hist, tr)
+    for tab, (label, key, crops, note) in zip(tabs[1:], PROCESSORS):
         with tab:
             st.caption(note)
             if tr["tab_destination"].get(label) is None:

@@ -39,6 +39,28 @@ def dorans_freight_by_year(commodity="Corn", size="Large", source="Railroad", ti
     return dict(sorted(out.items()))
 
 
+def tier_spread_by_year(commodity="Corn", size="Large", source="Railroad", small=("DORANS", "IL", "25-49 cars"), big=("CHAMPAIGN", "IL", "105+ cars")) -> dict:
+    """{year: {"small": [¢/bu per month], "big": [...], "spread": [...]}}: freight from Dorans on its 25-49 car tariff against Champaign on the 105+ car
+    tariff, month by month (each month's USDA tariff level and CN fuel surcharge on each one's estimated miles)."""
+    field = FD.CN_RATE_FIELD[(size, source)]
+    rows = FD.load_cn()
+    pick = lambda o: next((r for r in rows if (r["origin"], r["state"], r["tier"]) == o), None)
+    rs, rb = pick(small), pick(big)
+    if rs is None or rb is None:
+        return {}
+    ms, mb = CM.miles_to_gulf(small[0], small[1])[0], CM.miles_to_gulf(big[0], big[1])[0]
+    seed = FD.cn_seed_level()
+    out = {}
+    for ym, u in FD.cn_usda_series().items():
+        y, m = int(ym[:4]), int(ym[5:])
+        up, fsc = u["Railroad"] - seed, u.get("fsc_per_mile") or 0
+        a = FD.cn_freight_cpb(rs[field], size, commodity, up + fsc * (ms or 0))
+        b = FD.cn_freight_cpb(rb[field], size, commodity, up + fsc * (mb or 0))
+        d = out.setdefault(y, {k: [None] * 12 for k in ("small", "big", "spread")})
+        d["small"][m - 1], d["big"][m - 1], d["spread"][m - 1] = a, b, a - b
+    return dict(sorted(out.items()))
+
+
 def bid_history(all_rows, market: str) -> dict:
     """{period: [(date, bid)]} for a CN bid market from the rail archive, oldest first."""
     out = {}
@@ -50,6 +72,19 @@ def bid_history(all_rows, market: str) -> dict:
 def render() -> None:
     import plotly.graph_objects as go
     import streamlit as st
+    import rail_data as RD
+    import rail_seasonals
+
+    st.markdown("##### CN basis seasonals")
+    if RD.configured():
+        try:
+            rail_seasonals.render(_cached_bids())
+        except Exception as e:
+            st.info(f"Couldn't read the Basis Tracker's rail archive: {e}")
+    else:
+        st.info("The Basis Tracker's rail archive isn't connected here yet, so the CN basis seasonals can't be drawn.")
+    st.markdown("---")
+    st.markdown("##### CN freight and tariff")
 
     def lines(data, title, unit, fmt="%{y:,.1f}"):
         fig = go.Figure()
@@ -76,6 +111,24 @@ def render() -> None:
     with b:
         lines(series_by_year("fsc_per_mile"), "CN fuel surcharge", "$/car-mile", "%{y:.3f}")
     lines(dorans_freight_by_year(commodity, size, source), f"Dorans → Gulf freight, {commodity.lower()} (25-49 car tier, tariff + fuel)", "¢/bu")
+    ts = tier_spread_by_year(commodity, size, source)
+    if ts:
+        st.markdown("##### Freight spread: 25-49 car tariff vs 105+ cars")
+        latest = max(ts)
+        d = ts[latest]
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=MONTHS, y=d["spread"], name="Spread (25-49 less 105+)", marker_color="#f59e0b", opacity=0.55,
+                             hovertemplate="%{x}: %{y:.1f}¢ more for the small block<extra></extra>"))
+        fig.add_trace(go.Scatter(x=MONTHS, y=d["small"], name="Dorans, 25-49 cars", mode="lines+markers", line=dict(color="#0693e3", width=3)))
+        fig.add_trace(go.Scatter(x=MONTHS, y=d["big"], name="Champaign, 105+ cars", mode="lines+markers", line=dict(color="#32373c", width=3)))
+        fig.update_layout(title=dict(text=f"{latest}: freight to the Gulf, ¢/bu ({commodity.lower()}, {size.lower()} {source.lower()} car)", font=dict(size=14)),
+                          height=340, margin=dict(l=0, r=0, t=40, b=0), paper_bgcolor="#fff", plot_bgcolor="#fff", yaxis=dict(title="¢/bu", gridcolor="#e2e8f0"),
+                          legend=dict(orientation="h", y=-0.15))
+        st.plotly_chart(fig, use_container_width=True)
+        lines({y: v["spread"] for y, v in ts.items()}, "Spread by year: what loading under 105 cars costs, ¢/bu", "¢/bu")
+        vals = [v for v in d["spread"] if v is not None]
+        st.caption(f"Dorans only has a 25-49 car tariff rate; Champaign is the 105+ shuttle point the CN 105s bids are FOB. The spread is the tariff difference plus "
+                   f"the fuel surcharge on Dorans' extra rail miles, so it moves with the surcharge: {min(vals):.1f}¢ to {max(vals):.1f}¢ across {latest}.")
     st.caption("USDA AMS AgTransport, CN's monthly series from Nov 2023 (snapshot 2026-10-28). October is the seasonal peak and November steps down "
                "(−$220 in 2024, −$330 in 2025). Dorans' line applies each month's change in the USDA tariff level to its own rate and adds the "
                "month's surcharge on its estimated rail miles; USDA lists no other CN origin, so that move is assumed for Dorans too.")
