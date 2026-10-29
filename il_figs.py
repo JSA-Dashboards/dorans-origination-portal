@@ -105,17 +105,23 @@ def geo_view(geo: dict, pad_lon: float = 0.25, pad_lat: float = 0.2) -> dict:
     return {"lon": [min(lons) - pad_lon, max(lons) + pad_lon], "lat": [min(lats) - pad_lat, max(lats) + pad_lat]}
 
 
-def frame_map(fig, geo: dict) -> None:
-    v = geo_view(geo)
+def extent_view(extent) -> dict:
+    """extent = (lat, lon, radius miles) -> lon / lat ranges around that point."""
+    lat, lon, r = extent
+    return {"lon": [lon - r / (69.0 * math.cos(math.radians(lat))), lon + r / (69.0 * math.cos(math.radians(lat)))], "lat": [lat - r / 69.0, lat + r / 69.0]}
+
+
+def frame_map(fig, geo: dict, extent=None) -> None:
+    v = extent_view(extent) if extent else geo_view(geo)
     fig.update_geos(projection_type="mercator", lonaxis_range=v["lon"], lataxis_range=v["lat"], visible=False, bgcolor=DARK, landcolor=LAND,
                     showframe=False, showlakes=False)
 
 
-def place_labels(fig, fips_list, values, centroids, label_fn, avoid=(), suffix=None):
+def place_labels(fig, fips_list, values, centroids, label_fn, avoid=(), suffix=None, zoom: float = 1.0):
     """County value labels, biggest counties first, thinned so they don't collide; `suffix` = {fips: text} (an asterisk for an estimate)."""
     areas = [centroids[f][2] for f in fips_list if f in centroids]
     avg_area = float(np.mean(areas)) if areas else 0.1
-    size = int(np.clip(10 + np.log(max(avg_area, 0.01) / 0.05) * 1.6, 9, 13))
+    size = int(np.clip(10 + np.log(max(avg_area, 0.01) / 0.05) * 1.6, 9, 13) + (3 if zoom < 1 else 0))
     cands = []
     for fips, val in zip(fips_list, values):
         label = label_fn(val)
@@ -123,7 +129,7 @@ def place_labels(fig, fips_list, values, centroids, label_fn, avoid=(), suffix=N
             cx, cy, area = centroids[fips]
             cands.append((area, cx, cy, label + (suffix or {}).get(fips, "")))
     cands.sort(reverse=True)
-    min_sep = float(np.clip(0.12 + avg_area * 0.8, 0.14, 0.3))
+    min_sep = float(np.clip(0.12 + avg_area * 0.8, 0.14, 0.3)) * zoom
     placed, lons, lats, texts = [], [], [], []
     for area, cx, cy, label in cands:
         if not any((cx - px) ** 2 + (cy - py) ** 2 < min_sep ** 2 for px, py in placed):
@@ -193,15 +199,15 @@ def add_plants(fig, plants: list, crop: str) -> None:
         hovertemplate="%{text}<extra></extra>", showlegend=True))
 
 
-def _finish(fig, title: str, sub: str, geo: dict, bottom: bool) -> None:
-    frame_map(fig, geo)
-    fig.update_layout(**_base_layout(f"{title}<br><sup>{sub}</sup>", 17, 60), height=860 if bottom else 800)
+def _finish(fig, title: str, sub: str, geo: dict, bottom: bool, extent=None) -> None:
+    frame_map(fig, geo, extent)
+    fig.update_layout(**_base_layout(f"{title}<br><sup>{sub}</sup>", 17, 60), height=(760 if extent else 860 if bottom else 800))
     if bottom:
         fig.update_layout(margin=dict(l=0, r=0, t=60, b=110))
 
 
 def county_fig(df: pd.DataFrame, geo: dict, crop: str, year: int, metric: str, change_view: str, comp_rows=None, plants=None,
-               forecast: bool = False):
+               forecast: bool = False, extent=None):
     """df: [County, fips, Value, is_estimated]. Estimated counties' labels end in an asterisk."""
     if df is None or df.empty:
         return None
@@ -230,7 +236,7 @@ def county_fig(df: pd.DataFrame, geo: dict, crop: str, year: int, metric: str, c
                       x=0.01, xanchor="left", y=0.02, yanchor="bottom", bgcolor="rgba(255,255,255,0.85)")))
     rep = [f for f in all_fips if val.get(f) is not None and not pd.isna(val.get(f))]
     place_labels(fig, rep, [val[f] for f in rep], geo["centroids"], cfg["label_fn"], avoid=[(DORANS["lon"], DORANS["lat"])],
-                 suffix={f: "*" for f in rep if est.get(f)})
+                 suffix={f: "*" for f in rep if est.get(f)}, zoom=(0.45 if extent else 1.0))
     if plants:
         add_plants(fig, plants, crop)
     if comp_rows:
@@ -239,7 +245,7 @@ def county_fig(df: pd.DataFrame, geo: dict, crop: str, year: int, metric: str, c
     sub = f"Map labels in {cfg['label_unit']}" + ("  ·  * = county value estimated" if any(est.values()) else "")
     if forecast:
         sub += "  ·  forecast: USDA's state estimate split by each county's 3-year share"
-    _finish(fig, f"NASS {year}{' forecast' if forecast else ''} {crop} — {view_label} | Illinois Counties", sub, geo, bool(comp_rows))
+    _finish(fig, f"NASS {year}{' forecast' if forecast else ''} {crop} — {view_label} | Illinois Counties", sub, geo, bool(comp_rows), extent)
     return fig
 
 
@@ -255,7 +261,7 @@ def _exteriors(geom):
 
 
 def district_fig(view_df: pd.DataFrame, raw_df: pd.DataFrame, geo: dict, crop: str, year: int, metric: str, change_view: str,
-                 est_districts: set, comp_rows=None, plants=None, forecast: bool = False):
+                 est_districts: set, comp_rows=None, plants=None, forecast: bool = False, extent=None):
     """Counties coloured by NASS district value, bold district outlines, name + value labels."""
     if view_df is None or view_df.empty:
         return None
@@ -310,7 +316,7 @@ def district_fig(view_df: pd.DataFrame, raw_df: pd.DataFrame, geo: dict, crop: s
         add_competition(fig, comp_rows)
     add_dorans(fig, bool(comp_rows))
     _finish(fig, f"NASS {year}{' forecast' if forecast else ''} {crop} — {view_label} | Illinois Ag Districts",
-            "District = its counties added up" + ("  ·  Est = some counties filled in" if est_districts else ""), geo, bool(comp_rows))
+            "District = its counties added up" + ("  ·  Est = some counties filled in" if est_districts else ""), geo, bool(comp_rows), extent)
     return fig
 
 
@@ -511,4 +517,33 @@ def heatmap_table(rows: dict, years: list, title: str, unit: str = "M bu", divis
         cells=dict(values=vals, fill_color=fills, font=dict(color=fonts, size=11, family="Arial"), align=["left"] + ["right"] * (len(years) + 6),
                    height=24, line_color=_BR)))
     fig.update_layout(paper_bgcolor=_D, margin=dict(l=0, r=0, t=30, b=0), height=max(150, n_rows * 26 + 70), title=dict(text=title, font=dict(color=_A, size=13)))
+    return fig
+
+
+# ── draw territory ────────────────────────────────────────────────────────────
+def territory_fig(lat, lon, share, bushels, nodes: list, geo: dict, crop: str, year: int, extent=None):
+    """Lattice points coloured by the share of their bushels that goes to Dorans (node 0), sized by bushels; the competing buyers drawn on top."""
+    keep = np.ones(len(lat), dtype=bool)
+    if extent:
+        v = extent_view(extent)
+        keep = (lon >= v["lon"][0]) & (lon <= v["lon"][1]) & (lat >= v["lat"][0]) & (lat <= v["lat"][1])
+    sz = np.clip(np.sqrt(bushels[keep] / max(float(bushels[keep].max()) if keep.any() else 1.0, 1.0)) * (16 if extent else 9) + 2, 2, 20)
+    fig = go.Figure()
+    cfips = [f["id"] for f in geo["counties"]["features"]]
+    fig.add_trace(go.Choropleth(geojson=geo["counties"], featureidkey="id", locations=cfips, z=[0] * len(cfips), colorscale=[[0, PANEL], [1, PANEL]],
+                                showscale=False, marker=dict(line=dict(color="#8fa6bb", width=1.0)), hoverinfo="skip"))
+    fig.add_trace(go.Scattergeo(
+        lon=lon[keep], lat=lat[keep], mode="markers", name="Draw", showlegend=False,
+        marker=dict(size=sz, color=share[keep] * 100, colorscale=[[0, "#e5e7eb"], [0.15, "#bfdbfe"], [0.5, "#3b82f6"], [1, "#1e3a8a"]], cmin=0, cmax=100,
+                    line=dict(width=0), opacity=0.9, colorbar=dict(title=dict(text="% to<br>Dorans", font=dict(color=TEXT, size=13)), thickness=18, len=0.3,
+                                                                    x=0.01, xanchor="left", y=0.02, yanchor="bottom", bgcolor="rgba(255,255,255,0.85)")),
+        text=[f"{s * 100:.0f}% to Dorans · {b / 1e3:,.0f}K bu" for s, b in zip(share[keep], bushels[keep])], hovertemplate="%{text}<extra></extra>"))
+    others = [n for n in nodes[1:] if n["lat"] is not None]
+    fig.add_trace(go.Scattergeo(lon=[n["lon"] for n in others], lat=[n["lat"] for n in others], mode="markers", name="Competing buyers",
+                                marker=dict(symbol="circle", size=9, color="#dc2626", line=dict(color="white", width=1.3)),
+                                text=[f"<b>{n['name']}</b><br>{n.get('miles', '')} mi from Dorans · adder {n.get('adder', 0):+.0f}¢" for n in others],
+                                hovertemplate="%{text}<extra></extra>"))
+    add_dorans(fig, False)
+    _finish(fig, f"{year} {crop} draw territory — share of grain going to Dorans | Illinois",
+            "Each dot = ~4 miles of county production, sized by bushels, coloured by Dorans' share", geo, False, extent)
     return fig

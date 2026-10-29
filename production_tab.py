@@ -13,6 +13,7 @@ import streamlit as st
 
 import il_figs as nf
 import production as P
+import territory_tab
 
 HERE = Path(__file__).parent
 STATS = ("production", "harvested", "yield")
@@ -145,7 +146,7 @@ def render() -> None:
 
     # ── map ──
     mv1, mv2, mv3 = st.columns([1, 1.9, 1.5])
-    mv1.radio("Map View", ["ASD District", "County"], horizontal=True, key="il_map_view")
+    mv1.radio("Map View", ["ASD District", "County", "Draw Territory"], horizontal=True, key="il_map_view")
     map_view = st.session_state["il_map_view"]
     comp_rows, plants = _competition()
     with mv2:
@@ -156,10 +157,16 @@ def render() -> None:
         show_pl = st.checkbox("Show soy crush plants" if crop == "Soybeans" else "Show ethanol plants", True, key="il_plants")
     cr = comp_rows if show_comp else None
     pl = plants if show_pl else None
+    ex1, ex2, _ = st.columns([1.1, 1.6, 1.8])
+    zoom = ex1.radio("Map extent", ["Illinois", "Dorans area"], horizontal=True, key="il_extent")
+    extent = None
+    if zoom == "Dorans area":
+        radius = ex2.slider("Zoom radius (miles)", 25, 120, 60, 5, key="il_zoom_r")
+        extent = (nf.DORANS["lat"], nf.DORANS["lon"], radius)
 
     if map_view == "ASD District":
         est_d = set(ddf.loc[ddf["est"] > 0, "District"])
-        fig = nf.district_fig(ddf.rename(columns={}), ddf, geo, crop, year, metric, change, est_d, cr, pl, forecast=is_fc)
+        fig = nf.district_fig(ddf, ddf, geo, crop, year, metric, change, est_d, cr, pl, forecast=is_fc, extent=extent)
         if fig is None:
             st.info("ASD district map not available for this selection.")
         else:
@@ -187,8 +194,11 @@ def render() -> None:
                     st.caption("Est = some counties not published by NASS. Each is filled with its usual share of what the published counties leave "
                                "of NASS's official Illinois total, so the districts add up to the state." if not is_fc else
                                "Forecast: every county is USDA's state estimate times its 3-year share.")
+    elif map_view == "Draw Territory":
+        st.session_state["_il_geo"] = geo
+        territory_tab.render(crop, year, key, cdf, comp_rows, plants, extent, is_fc)
     else:
-        fig = nf.county_fig(cdf, geo, crop, year, metric, change, cr, pl, forecast=is_fc)
+        fig = nf.county_fig(cdf, geo, crop, year, metric, change, cr, pl, forecast=is_fc, extent=extent)
         if fig is None:
             st.info("County map not available for this selection.")
         else:
