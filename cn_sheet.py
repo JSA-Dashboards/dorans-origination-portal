@@ -72,6 +72,30 @@ def sheet_rows(rows, origins, size_source):
     return sorted(pick, key=lambda r: (r["state"], r["origin"], order.index(r["tier"])))
 
 
+def dorans_fob_by_month(bm: dict, commodity: str, fsc_window: dict, today: date, size="Large", source="Railroad", tier="25-49 cars") -> dict:
+    """{month: (cents/bu, futures symbol)} for a CN bid strip {month: (bid, symbol)} FOB Champaign, carried to Dorans on its own tariff tier:
+    bid + freight(Champaign, 105+ cars) - freight(Dorans, tier). The summary's FOB Dorans view for CN 25's."""
+    rows = FD.load_cn()
+    champ = champaign_row(rows)
+    dor = next((r for r in rows if (r["origin"], r["state"], r["tier"]) == ("DORANS", "IL", tier)), None)
+    if champ is None or dor is None:
+        return {}
+    names = [periods_name(m) for m in bm]
+    up, fsc = uplift_and_fsc(names, fsc_window, today)
+    field = FD.CN_RATE_FIELD[(size, source)]
+    out = {}
+    for m, (bid, sym) in bm.items():
+        v = fob(bid, champ, dor, size, field, commodity, m, fsc, up, bool(fsc_window))
+        if v is not None:
+            out[m] = (v, sym)
+    return out
+
+
+def periods_name(m: int) -> str:
+    import calendar
+    return calendar.month_abbr[m]
+
+
 # ── drawing ──────────────────────────────────────────────────────────────────────────────────────────────────────
 CSS = """<style>
 table.sheet{width:100%;border-collapse:collapse;font-size:.85rem}

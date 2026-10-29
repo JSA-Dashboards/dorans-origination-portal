@@ -180,9 +180,16 @@ def summary_rows(dest: dict, tr: dict, crop: str, view: str, today: date, n_mont
         y, m = (y + 1, 1) if m == 12 else (y, m + 1)
     rows = [f"{PER.MONTHS[m - 1]} {str(y)[-2:]}" for y, m in months]
     cols, skipped = [], []
-    for label, (asof, bm) in dest.items():
+    for label, entry in dest.items():
+        asof, bm = entry[0], entry[1]
         cents = 0
-        if view == "FOB Dorans":
+        if len(entry) > 2:                                         # a rail strip: its FOB Dorans strip is worked out from the freight, not the trucking sheet
+            if view == "FOB Dorans":
+                bm = entry[2]
+                if not bm:
+                    skipped.append(label)
+                    continue
+        elif view == "FOB Dorans":
             opts = truck_options(tr, label, crop)
             if not opts:
                 skipped.append(label)
@@ -230,6 +237,32 @@ def summary_html(rows: list, cols: list, today: date) -> str:
     return _SUM_CSS + "".join(h)
 
 
+CN25 = "CN 25's (rail)"
+
+
+def cn_destination() -> tuple:
+    """({CN 25's label: (as-of day, {month: (bid, symbol)}, {month: FOB Dorans})}, note): the CN 25's corn bid from the Basis Tracker's rail archive.
+    Empty with a note when the archive isn't reachable here."""
+    import rail_data as RD
+    if not RD.configured():
+        return {}, "CN 25's isn't shown: the rail archive isn't connected."
+    try:
+        import cn_sheet
+        import rail_fsc as RF
+        import streamlit as st
+        rows = cn_sheet._cached_bids()
+        cells, d = cn_sheet._latest_cells(rows, "CN 25's")
+        if not cells:
+            return {}, "CN 25's has no bids posted yet."
+        quotes = [[p, c.get("futures"), c.get("bid"), 0] for p, c in cells.items() if c.get("bid") is not None]
+        bm = PER.by_month(quotes)
+        win = RF.window("CN", cn_sheet._diesel(), date.today())
+        fob_bm = cn_sheet.dorans_fob_by_month(bm, "Corn", win, date.today())
+        return {CN25: (str(d), bm, fob_bm)}, ""
+    except Exception as e:
+        return {}, f"CN 25's couldn't be read ({e})."
+
+
 def render_summary(hist: dict, tr: dict) -> None:
     import streamlit as st
     c1, c2 = st.columns([1, 1.4])
@@ -237,6 +270,10 @@ def render_summary(hist: dict, tr: dict) -> None:
     view = c2.radio("View", ["Delivered bids", "FOB Dorans"], horizontal=True, key="proc_sum_view",
                     help="Delivered = the bid as the buyer posts it. FOB Dorans = that bid less the cheapest truck rate from Dorans to the buyer.")
     dest = destinations(hist, crop)                                       # only buyers that actually post a bid for this commodity
+    cn_note = ""
+    if crop == "Corn":
+        cn, cn_note = cn_destination()
+        dest.update(cn)
     names = list(dest)
     picked = st.multiselect("Destinations", names, default=names, key=f"proc_sum_dest_{crop}")
     chosen = {k: v for k, v in dest.items() if k in picked}
@@ -250,7 +287,9 @@ def render_summary(hist: dict, tr: dict) -> None:
                 if view == "Delivered bids" else
                 "Basis less the cheapest truck rate from Dorans, cents/bu; the futures month is the buyer's. ") +
                "Blue = the best bid in that delivery month. A month with a full bid uses it; with none, the FH / LH midpoint. Faded = last posted more than 5 days ago."
-               + (f" No trucking rate on the sheet for: {', '.join(skipped)}." if skipped else ""))
+               + (f" No trucking rate on the sheet for: {', '.join(skipped)}." if skipped else "")
+               + (" CN 25's is a rail bid: its FOB Dorans = the bid (taken as FOB Champaign, like the 105s) + CN freight from Champaign (105+ cars) less CN freight from Dorans on its 25-49 car tariff, with the fuel surcharge." if "CN 25's (rail)" in [c['label'] for c in cols] else "")
+               + (f" {cn_note}" if cn_note else ""))
 
 
 def render() -> None:
