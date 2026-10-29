@@ -1,0 +1,196 @@
+"""CN rail FOB sheet for Farmers Grain Co of Dorans (Mattoon, IL).
+
+Same method as the Rail Corridors app's CN tab, cut down to the origins that matter here: the CN 105s bid (corn; the beans twin
+`CN 105s Beans`) is FOB Champaign for a 105-car shuttle, so an origin's FOB = bid + freight(Champaign, 105+ cars) - freight(origin).
+Freight = CN tariff $/car (moved to the month's USDA level) + CN 7403 fuel surcharge $/car-mile x rail miles, / bu per car -> cents/bu.
+Dorans only has a 25-49 car tariff rate (its 1-2 note) and Mattoon 25-49 and 50-104, so each tier is its own row and the tier is
+named: a smaller block of cars pays more freight, which is the real cost of loading at Dorans rather than a 105-car shuttle point.
+
+Pure functions (tested) take the bids and the freight inputs; `render()` does the reading and drawing.
+"""
+from datetime import date
+
+import freight_data as FD
+import cn_miles as CM
+
+MARKETS = {"Corn": "CN 105s", "Soybeans": "CN 105s Beans"}
+DEFAULT_ORIGINS = [("DORANS", "IL"), ("MATTOON", "IL"), ("COLES", "IL"), ("CHAMPAIGN", "IL")]
+TOP_TIER = FD.CN_VOLUME_TIER_ORDER[-1]
+
+
+def month_of(period: str):
+    return FD.bn_period_first_month(period)
+
+
+def freight_cpb(row, size, field, commodity, month, fsc_by_month, uplift_by_month, fsc_on=True, miles_over=None):
+    """Freight in cents/bu for one tariff row in one month, or None when the fuel surcharge or the miles aren't known (so a cell
+    shows '—' rather than a freight without its fuel)."""
+    extra = float(uplift_by_month.get(month, 0))
+    if fsc_on:
+        key = (row["origin"], row["state"])
+        mi = (miles_over or {}).get(key)
+        if mi is None:
+            mi = CM.miles_to_gulf(key[0], key[1])[0]
+        f = fsc_by_month.get(month)
+        if f is None or mi is None:
+            return None
+        extra += f * mi
+    return FD.cn_freight_cpb(row[field], size, commodity, extra)
+
+
+def fob(bid, champ_row, row, size, field, commodity, month, fsc_by_month, uplift_by_month, fsc_on=True):
+    """bid (cents vs the futures tag, FOB Champaign) carried to `row`: bid + freight(Champaign) - freight(row)."""
+    if bid is None:
+        return None
+    fc = freight_cpb(champ_row, size, field, commodity, month, fsc_by_month, uplift_by_month, fsc_on)
+    fo = freight_cpb(row, size, field, commodity, month, fsc_by_month, uplift_by_month, fsc_on)
+    return None if fc is None or fo is None else bid + fc - fo
+
+
+def champaign_row(rows):
+    return next((r for r in rows if r["origin"] == "CHAMPAIGN" and r["state"] == "IL" and r["tier"] == TOP_TIER), None)
+
+
+def uplift_and_fsc(periods, fsc_window, today):
+    """({month: tariff uplift $/car vs the seed}, {month: CN surcharge $/mile}) for the months the periods name."""
+    seed = FD.cn_seed_level()
+    up, fsc = {}, {}
+    for p in periods:
+        mo = month_of(p)
+        if not mo:
+            continue
+        level, _ = FD.cn_tariff_level(mo, today)
+        up[mo] = 0 if level is None else level - seed
+        fsc[mo] = (fsc_window.get(FD._BN_MONTH3_REV[mo]) or {}).get("fsc")
+    return up, fsc
+
+
+def sheet_rows(rows, origins, size_source):
+    """Tariff rows for the picked origins, in origin then tier order."""
+    order = FD.CN_VOLUME_TIER_ORDER
+    pick = [r for r in rows if (r["origin"], r["state"]) in set(origins) and r["tier"]]
+    return sorted(pick, key=lambda r: (r["state"], r["origin"], order.index(r["tier"])))
+
+
+# ── drawing ──────────────────────────────────────────────────────────────────────────────────────────────────────
+CSS = """<style>
+table.sheet{width:100%;border-collapse:collapse;font-size:.85rem}
+table.sheet th{font-size:.68rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:7px 10px;
+ border-bottom:2px solid #e2e8f0;text-align:right;white-space:nowrap}
+table.sheet th.l{text-align:left}
+table.sheet td{padding:6px 10px;text-align:right;border-bottom:1px solid #f1f1f1;color:#333;white-space:nowrap;font-variant-numeric:tabular-nums}
+table.sheet td.lbl{text-align:left;font-weight:600;color:#2c3e50}
+table.sheet td.sub{text-align:left;color:#6b7280;font-size:.78rem}
+table.sheet td.best{background:#eaf4fc;font-weight:700}
+table.sheet td.neg{color:#c00000}
+table.sheet tr.ref td{background:#fff9c4}
+.wrap{border-radius:10px;box-shadow:0 1px 6px rgba(0,0,0,.08);padding:8px;overflow-x:auto;background:#fff;margin:6px 0}
+</style>"""
+
+
+def _cell(v):
+    if v is None:
+        return "<td>—</td>"
+    t = f"{v:+.1f}"
+    return f'<td class="{"neg" if v < 0 else ""}">{t}</td>'
+
+
+def render() -> None:
+    import streamlit as st
+    import rail_data as RD
+    import rail_fsc as RF
+    import bn_fsc as BNF
+
+    st.caption("CN 105s bids (FOB Champaign) carried to the Dorans area: bid + freight(Champaign) − freight(origin), cents/bu. "
+               "Freight = CN tariff at the month's USDA level + CN fuel surcharge on estimated rail miles, ÷ bushels per car.")
+    if not RD.configured():
+        st.info("The rail bid archive isn't connected yet. Set `USE_SNOWFLAKE = 1` and the `SNOWFLAKE_*` secrets (a role that can read "
+                "`JSA.BASIS_TRACKER`) to show the CN 105s bids here.")
+        return
+
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 1.4])
+    commodity = c1.radio("Commodity", FD.CN_COMMODITIES, horizontal=True, key="cn_commodity")
+    size = c2.radio("Car size", list(FD.CN_SIZES), index=1, horizontal=True, key="cn_size")
+    source = c3.radio("Car source", list(FD.CN_SOURCES), horizontal=True, key="cn_source")
+    fsc_on = c4.checkbox("Include CN fuel surcharge", True, key="cn_fsc")
+    field = FD.CN_RATE_FIELD[(size, source)]
+
+    rows = FD.load_cn()
+    names = sorted({f"{r['origin'].title()}, {r['state']}" for r in rows if r["state"] == "IL"})
+    default = [f"{o.title()}, {s}" for o, s in DEFAULT_ORIGINS]
+    picked = st.multiselect("Origins (Illinois)", names, default=[n for n in default if n in names], key="cn_origins")
+    origins = [(n.split(", ")[0].upper(), n.split(", ")[1]) for n in picked]
+
+    try:
+        all_rows = _cached_bids()
+    except Exception as e:
+        st.error(f"Couldn't read the rail bid archive: {e}")
+        return
+    cells, as_of = _latest_cells(all_rows, MARKETS[commodity])
+    periods = [p for p in _ordered(cells) if cells[p].get("bid") is not None and month_of(p)]
+    if not periods:
+        st.info(f"No {MARKETS[commodity]} bids posted yet.")
+        return
+    champ = champaign_row(rows)
+    if champ is None:
+        st.error("The tariff has no Champaign, IL 105+ car rate to carry the bid from.")
+        return
+
+    weekly = _diesel()
+    win = RF.window("CN", weekly, date.today()) if fsc_on else {}
+    uplift, fsc = uplift_and_fsc(periods, win, date.today())
+
+    hdr = "".join(f"<th>{p}<br><span style='font-weight:400;text-transform:none'>{cells[p].get('futures') or ''}</span></th>" for p in periods)
+    html = [CSS, '<div class="wrap"><table class="sheet"><tbody>', f'<tr><th class="l">Origin · tier</th>{hdr}</tr>']
+    html.append('<tr class="ref"><td class="lbl">CN 105s bid <span class="sub">(FOB Champaign)</span></td>'
+                + "".join(f'<td>{cells[p]["bid"]:+.0f}</td>' for p in periods) + "</tr>")
+    for r in sheet_rows(rows, origins, (size, source)):
+        vals = [fob(cells[p]["bid"], champ, r, size, field, commodity, month_of(p), fsc, uplift, fsc_on) for p in periods]
+        html.append(f'<tr><td class="lbl">{r["origin"].title()}, {r["state"]} <span class="fut-sub sub">{r["tier"]}</span></td>'
+                    + "".join(_cell(v) for v in vals) + "</tr>")
+    html.append("</tbody></table></div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+    miles = [f"{o.title()} {CM.miles_to_gulf(o, s)[0]:,.0f}" for o, s in origins if CM.miles_to_gulf(o, s)[0]]
+    st.caption(f"Bids as of {as_of} (cents vs the futures month shown). {size} car ({FD.CN_BU_PER_CAR[commodity][size]:,} bu), "
+               f"{source.lower()}-supplied. Rail miles to the Gulf (estimated): {', '.join(miles) or '—'}. "
+               "A tier below 105+ cars pays more freight, so a Dorans row sits below the Champaign bid by that difference plus its extra miles.")
+
+
+# cached readers (Streamlit's cache sits here so the pure functions above import without Streamlit)
+def _cached_bids():
+    import streamlit as st
+    import rail_data as RD
+
+    @st.cache_data(ttl=300, show_spinner="Reading the rail bid archive…")
+    def go():
+        return RD.get_all("manual")
+    return go()
+
+
+def _diesel():
+    import streamlit as st
+    import bn_fsc as BNF
+    if not BNF.available():
+        return None
+
+    @st.cache_data(ttl=21600)
+    def go(anchor):
+        try:
+            return BNF.fetch_weekly(date(anchor, 7, 1))
+        except Exception:
+            return None
+    return go(BNF.crop_year_anchor(date.today()))
+
+
+def _latest_cells(all_rows, market):
+    """{period: row} for the market's latest posting date, and that date."""
+    sel = [r for r in all_rows if r["market"] == market]
+    if not sel:
+        return {}, None
+    d = max(r["date"] for r in sel)
+    return {r["period"]: r for r in sel if r["date"] == d}, d
+
+
+def _ordered(cells):
+    return sorted(cells, key=lambda p: (cells[p].get("period_order") if cells[p].get("period_order") is not None else 99, p))

@@ -1,0 +1,21 @@
+# Dorans Origination Portal
+
+Standalone Streamlit app for Farmers Grain Co of Dorans (Mattoon, Coles County, IL): one location, the Soy Crush / Draw Territory method at a micro scale.
+Started 2026-10-29. Tabs: **IL Production** (`production.py`; 2026 = USDA state estimate x county 3-yr share), **Competition** (`competitors.py`), **Processors** (`processors.py`, seasonals from `data/processors_history.json`, a read-only pull of the basis tracker archive via the droplet), **CN Rail FOB** (`cn_sheet.py`), **CN Seasonals** (`cn_seasonals.py`).
+
+- **Production:** NASS county corn (grain) and soybean production / harvested acres / yield, 2015-2025, rolled up to NASS crop-reporting districts (ASD).
+  **Withheld counties are filled the same way as the NASS / RMA dashboard's heat map** (`year_values` = `heat_map.fill_withheld`: published counties kept, the rest of NASS's official IL total spread over withheld counties by their share in the 3 earlier years; checkbox on by default; ASD = counties dissolved). State totals in `_state` (`build_il_state.py`). Static snapshot `data/il_county_prod.json` from `build_il_production.py` (needs `NASS_API_KEY` locally; the key never ships). County shapes in
+  `data/il_county_geo.json` are the rma-production-map county file cut to Illinois, rings re-oriented CLOCKWISE (plotly choropleth trap). NASS withholds
+  counties (corn 2024: 63 of 102 published), so a multi-year view averages the years a county published. Miles are straight-line from Mattoon to the county centre.
+- **CN Rail FOB:** vendored copies of the Rail Corridors app's `freight_data.py`, `cn_miles.py`, `bn_locator.py`, `rail_fsc.py`, `bn_fsc.py`, `rail_data.py`,
+  `river_data.py`, `cn_freight_seed.json`, `data/usda_cn_tariff.json`, `data/rail_directory/*`. **That app is the source of truth: change a module there, then re-copy.**
+  FOB(origin) = CN 105s bid (corn) or CN 105s Beans bid, both FOB Champaign, + freight(Champaign, 105+ cars) - freight(origin tier). Dorans has only a 25-49 car tariff
+  rate, so its row sits below Champaign by the tier difference plus extra miles. Reads `JSA.BASIS_TRACKER.rail_fob` (needs `USE_SNOWFLAKE` + `SNOWFLAKE_*`; without them the tab says so).
+  `EIA_API_KEY` for the fuel-surcharge formula (else CN's published values, held flat).
+- **CN Seasonals:** USDA AMS monthly CN series (tariff, fuel surcharge) by year, Dorans' own delivered-to-Gulf freight, and the CN 105s bids by posting date (the archive only has
+  forward bids since Aug 2026, so a true bid seasonal needs a year).
+- Not yet: copy/PNG buttons on the FOB table, state index, CIF NOLA netback, draw territory around Mattoon, deploy (repo, Cloud secrets).
+
+- **Competition:** `data/competitors.json` from `build_competitors.py`: the 7 elevators Kolten named (2026-10-29: Primient Coles / Mattoon, ADM Sullivan / Tuscola, TGM Arcola / Neoga) + candidates within 45 miles from the rail shipper directories and crush/ethanol lists. Primient Coles, Primient Mattoon and ADM Sullivan are placed from the street addresses Kolten sent (Census geocoder); the rest from the tracker's pins. Jones Switch was dropped. Dorans pin = the hamlet (39.5511, -88.3445), 5 miles north of Mattoon.
+
+- **Processor seasonals stay current:** `processors.load()` = the shipped snapshot (`data/processors_history.json`, through its last day) with every day since replaced by a live read of the basis tracker's `snapshots` / `snapshot_rows` for the same provider/location pairs (`PAIRS`), cached 1 h. Same Snowflake secrets as the CN tab; without them the tab shows the snapshot and says so. A new processor = add its (provider, location) to `PAIRS` and `PROCESSORS`, and re-pull the snapshot for its history.

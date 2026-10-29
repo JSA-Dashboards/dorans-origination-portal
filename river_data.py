@@ -1,0 +1,172 @@
+"""
+Read-only access to the River FOB Portal's CIF NOLA curves (Corn, Soybeans).
+
+CN's Gulf Export freight doesn't net against a rail_fob bid market like
+CSX/NS/BN do — Kolten's call (2026-08-26): net it against CIF NOLA from
+the River FOB Portal instead, since CN's whole business here is moving grain
+to the Gulf for export, same as the barge/river network CIF represents.
+
+Backend: Snowflake (RIVER_FOB.PUBLIC — the River FOB Portal's own database) when
+USE_SNOWFLAKE is set; otherwise the portal's Postgres via RIVER_DATABASE_URL
+(the same name the basis tracker already uses for this exact cross-database
+read). Degrades to a notice, never raises, if neither is available.
+
+cif_history stores value in $/bu (confirmed against basis-tracker's own
+_riv_cif_cents, which does `value * 100` to get cents) — this module
+converts to ¢/bu on the way out so it matches every other price in this app.
+"""
+import os
+
+# Calendar order for CIF's month labels ("June","July","Aug",...,"Jan" — the
+# first two are spelled out, the rest are 3-letter, per the source workbook's
+# own SEED_MONTHS convention). Cycles past December.
+_MONTH_ORDER = ["June", "July", "Aug", "Sep", "Oct", "Nov", "Dec",
+                "Jan", "Feb", "Mar", "Apr", "May"]
+
+
+def _url() -> str:
+    env_val = os.environ.get("RIVER_DATABASE_URL", "").strip()
+    if env_val:
+        return env_val
+    try:
+        import _snowflake
+        return (_snowflake.get_generic_secret_string("RIVER_DATABASE_URL") or "").strip()
+    except ImportError:
+        return ""   # not running inside Snowflake — no secret to fall back to
+
+
+def _in_sis() -> bool:
+    """True when running inside Streamlit in Snowflake."""
+    try:
+        import _snowflake  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _use_snowflake() -> bool:
+    if _in_sis():
+        return True
+    return os.environ.get("USE_SNOWFLAKE", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def configured() -> bool:
+    """Snowflake (RIVER_FOB.PUBLIC) counts as configured on its own; otherwise a
+    RIVER_DATABASE_URL is required. False → the app shows a notice, never raises."""
+    return _use_snowflake() or bool(_url())
+
+
+def source_name() -> str:
+    return "Snowflake" if _use_snowflake() else "Postgres"
+
+
+# This portal cross-reads two Snowflake databases — RIVER_FOB.PUBLIC (CIF, here)
+# and JSA.BASIS_TRACKER (rail bids, in rail_data.py) — so each module pins its own
+# database+schema at connect time rather than relying on an ambient
+# SNOWFLAKE_DATABASE. The River FOB archive lives in its own RIVER_FOB.PUBLIC
+# database (deliberately not a schema inside JSA).
+_SF_DATABASE = "RIVER_FOB"
+_SF_SCHEMA = "PUBLIC"
+
+
+def _load_private_key():
+    """RSA private key for Snowflake key-pair auth (the account enforces MFA on
+    password sign-ins), as DER bytes; None if not configured (falls back to password).
+    Source: SNOWFLAKE_PRIVATE_KEY_PATH (.p8 file) or SNOWFLAKE_PRIVATE_KEY (PEM text)."""
+    path = (os.environ.get("SNOWFLAKE_PRIVATE_KEY_PATH") or "").strip()
+    pem = os.environ.get("SNOWFLAKE_PRIVATE_KEY") or ""
+    if not path and not pem.strip():
+        return None
+    from cryptography.hazmat.primitives import serialization
+    data = open(path, "rb").read() if path else pem.replace("\\n", "\n").encode()
+    pwd = os.environ.get("SNOWFLAKE_PRIVATE_KEY_PWD") or None
+    key = serialization.load_pem_private_key(data, password=pwd.encode() if pwd else None)
+    return key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption())
+
+
+def _sf_connect():
+    if _in_sis():
+        from snowflake.snowpark.context import get_active_session
+        conn = get_active_session().connection
+        conn.cursor().execute(f"USE DATABASE {_SF_DATABASE}")
+        conn.cursor().execute(f"USE SCHEMA {_SF_SCHEMA}")
+        return conn
+    import snowflake.connector as sc
+    kw = dict(
+        account=os.environ["SNOWFLAKE_ACCOUNT"],
+        user=os.environ["SNOWFLAKE_USER"],
+        role=os.environ.get("SNOWFLAKE_ROLE") or None,
+        warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE") or None,
+        database=_SF_DATABASE,
+        schema=_SF_SCHEMA,
+        login_timeout=30,
+    )
+    pkey = _load_private_key()
+    if pkey is not None:
+        kw["private_key"] = pkey
+    else:
+        kw["password"] = os.environ.get("SNOWFLAKE_PASSWORD") or None
+    conn = sc.connect(**{k: v for k, v in kw.items() if v is not None})
+    try:
+        conn._paramstyle = "pyformat"
+    except Exception:
+        pass
+    return conn
+
+
+def _sf_rows(sql, params):
+    """Snowflake read against RIVER_FOB.PUBLIC; UPPERCASE column names lowered so
+    callers (r['month'], r['value'], r['d']) are unchanged from the Postgres path."""
+    import snowflake.connector
+    conn = _sf_connect()
+    try:
+        cur = conn.cursor(snowflake.connector.DictCursor)
+        cur.execute(sql, params)
+        return [{k.lower(): v for k, v in r.items()} for r in cur.fetchall()]
+    finally:
+        if not _in_sis():
+            conn.close()
+
+
+def _pg_rows(sql, params):
+    import psycopg2
+    import psycopg2.extras
+    conn = psycopg2.connect(_url(), cursor_factory=psycopg2.extras.RealDictCursor,
+                            connect_timeout=10)
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _rows(sql, params):
+    return _sf_rows(sql, params) if _use_snowflake() else _pg_rows(sql, params)
+
+
+def month_sort_key(label):
+    try:
+        return _MONTH_ORDER.index(label)
+    except ValueError:
+        return 99
+
+
+def latest_cif(commodity="Corn"):
+    """The most recently archived date's CIF NOLA curve for a commodity
+    ("Corn" or "Soybeans", matching the River FOB Portal's own M.COMMODITIES
+    spelling).
+    -> (as_of_date_str_or_None, {month_label: cents_per_bu}), months ordered
+    by _MONTH_ORDER when iterated via sorted(..., key=month_sort_key)."""
+    head = _rows("SELECT MAX(as_of) AS d FROM cif_history WHERE commodity=%s", (commodity,))
+    as_of = head[0]["d"] if head and head[0].get("d") else None
+    if not as_of:
+        return None, {}
+    curve = _rows("SELECT month, value FROM cif_history WHERE commodity=%s AND as_of=%s",
+                  (commodity, as_of))
+    cif = {r["month"]: r["value"] * 100 for r in curve if r["value"] is not None}
+    return as_of, cif
