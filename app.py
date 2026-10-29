@@ -7,7 +7,7 @@ import cn_seasonals
 import competitors
 import cn_sheet
 import processors
-import production
+import production_tab
 
 for _k in ("USE_SNOWFLAKE", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_ROLE", "SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_PRIVATE_KEY",
            "SNOWFLAKE_PRIVATE_KEY_PWD", "EIA_API_KEY"):          # Cloud secrets -> environment, where the vendored readers look
@@ -28,7 +28,7 @@ html, body, [class*="css"], h1, h2, h3, h4 { font-family: "Source Sans Pro", sys
 
 tab_prod, tab_comp, tab_proc, tab_cn, tab_seas = st.tabs(["🌽 IL Production", "📍 Competition", "🏭 Processors", "🚂 CN Rail FOB", "📈 CN Seasonals"])
 with tab_prod:
-    production.render()
+    production_tab.render()
 with tab_comp:
     competitors.render()
 with tab_proc:
