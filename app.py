@@ -7,6 +7,7 @@ import cn_seasonals
 import competitors
 import cn_sheet
 import processors
+import market_share_tab
 import production_tab
 
 for _k in ("USE_SNOWFLAKE", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_ROLE", "SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_PRIVATE_KEY",
@@ -31,9 +32,11 @@ st.markdown(
     "<a href='https://basis-tracker-view.streamlit.app' target='_blank'>Basis Tracker view</a> data only: the same archive and the same hidden markets "
     "the view build shows.</p>", unsafe_allow_html=True)
 
-tab_prod, tab_comp, tab_proc, tab_cn, tab_seas = st.tabs(["🌽 IL Production", "📍 Competition", "🏭 Processors", "🚂 CN Rail FOB", "📈 CN Seasonals"])
+tab_prod, tab_share, tab_comp, tab_proc, tab_cn, tab_seas = st.tabs(["🌽 IL Production", "📊 Market Share", "📍 Competition", "🏭 Processors", "🚂 CN Rail FOB", "📈 CN Seasonals"])
 with tab_prod:
     production_tab.render()
+with tab_share:
+    market_share_tab.render()
 with tab_comp:
     competitors.render()
 with tab_proc:
