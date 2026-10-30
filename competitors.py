@@ -33,6 +33,12 @@ def render() -> None:
     last = P.years_of(prod, "Corn")[-1]
     est = P.estimate_year(prod, "Corn")
 
+    view = st.radio("Map view", ["Draw Territory", "Production map"], horizontal=True, key="comp_view")
+    if view == "Draw Territory":
+        _draw(d, plants, prod, geo, last, est)
+        _competitor_list(rows)
+        return
+
     c1, c2, c3, c4 = st.columns([1.3, 1.5, 1.2, 1.2])
     layer = c1.selectbox("Production layer", ["Corn", "Soybeans", "Corn + soybeans", "None"], key="comp_under")
     yopts = [f"{last} (latest)", f"5-year average ({last - 4}-{last})"] + ([f"{est} (forecast)"] if est else [])
@@ -79,6 +85,30 @@ def render() -> None:
     st.caption("Red = the elevators you named; orange = every other elevator within 30 miles that posts a bid in the basis tracker (the truck-delivered competition); "
                "grey = other candidates from the rail shipper directories and crush / ethanol lists within 45 miles. Primient Coles, Primient Mattoon and ADM Sullivan "
                "are placed from street addresses; the rest from the Basis Tracker's pins. County labels = M bu, withheld counties filled as on the IL Production tab (* = estimated).")
+
+    _competitor_list(rows)
+
+
+def _draw(d, plants, prod, geo, last, est) -> None:
+    """Dorans' draw territory (territory_tab) on this page: pick the crop, year and extent; the competitors in the data file are the buyers."""
+    import streamlit as st
+    import territory_tab
+
+    c1, c2, c3, c4 = st.columns([1.1, 1.5, 1.2, 1.2])
+    crop = c1.radio("Crop", ["Corn", "Soybeans"], horizontal=True, key="comp_dr_crop")
+    yopts = ([f"{est} (forecast)"] if est else []) + [str(y) for y in range(last, last - 5, -1)]
+    ysel = c2.selectbox("Production year", yopts, index=1 if est else 0, key="comp_dr_year")
+    year = int(ysel.split()[0])
+    extent = None
+    if c3.radio("Map extent", ["Illinois", "Dorans area"], horizontal=True, key="comp_dr_extent") == "Dorans area":
+        extent = (nf.DORANS["lat"], nf.DORANS["lon"], c4.slider("Zoom radius (miles)", 25, 120, 60, 5, key="comp_dr_zoom"))
+    cdf, _ = P.view_frames(prod, geo, crop, "production", year, "Current Year", None, True, None)
+    st.session_state["_il_geo"] = geo
+    territory_tab.render(crop, year, "production", cdf, d["rows"], plants, extent, year == est, pfx="comp")
+
+
+def _competitor_list(rows) -> None:
+    import streamlit as st
 
     with st.expander("Competitor list"):
         st.dataframe(pd.DataFrame([{"Name": r["name"], "Type": r["kind"], "Place": r["place"], "Miles from Dorans": r["miles"], "Named": "yes" if r["confirmed"] else "",

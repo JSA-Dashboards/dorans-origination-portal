@@ -13,7 +13,7 @@ def _lattice():
     return DR.load_lattice()
 
 
-def render(crop: str, year: int, key: str, cdf, comp_rows: list, plants: list, extent, is_fc: bool) -> None:
+def render(crop: str, year: int, key: str, cdf, comp_rows: list, plants: list, extent, is_fc: bool, pfx: str = "il") -> None:
     if key not in P.SUM_MEASURES:
         st.info("Draw territory moves bushels (or acres): pick Production or Harvested Acres as the Metric.")
         return
@@ -22,17 +22,17 @@ def render(crop: str, year: int, key: str, cdf, comp_rows: list, plants: list, e
     val = dict(zip(cdf["fips"], cdf["Raw"]))
     bu = np.nan_to_num(np.array([float(val.get(f) or 0.0) / n for f, n in zip(lat["fips"], lat["n"])], dtype=float))
     c1, c2, c3, c4 = st.columns(4)
-    freight = c1.slider("Haul cost (¢/bu per road mile)", 0.2, 1.5, 0.6, 0.05, key="il_dr_freight",
+    freight = c1.slider("Haul cost (¢/bu per road mile)", 0.2, 1.5, 0.6, 0.05, key=f"{pfx}_dr_freight",
                         help="Default 0.6 is about what the Devon Warren Decatur rate works out to (29¢ for roughly 45 road miles). Road miles = straight-line x 1.25.")
-    tau = c2.slider("Crossover (¢/bu)", 0.5, 15.0, 3.0, 0.5, key="il_dr_tau",
+    tau = c2.slider("Crossover (¢/bu)", 0.5, 15.0, 3.0, 0.5, key=f"{pfx}_dr_tau",
                     help="How far apart two buyers' net prices can be before the farther one stops getting grain. Small = the nearest / best buyer takes "
                          "almost all; large = more crossover.")
-    haul = c3.slider("Max haul (miles)", 20, 150, 60, 5, key="il_dr_haul", help="Grain only goes to buyers within this straight-line distance.")
-    d_add = c4.number_input("Dorans bid adder (¢/bu)", -30.0, 30.0, 0.0, 1.0, key="il_dr_dadd",
+    haul = c3.slider("Max haul (miles)", 20, 150, 60, 5, key=f"{pfx}_dr_haul", help="Grain only goes to buyers within this straight-line distance.")
+    d_add = c4.number_input("Dorans bid adder (¢/bu)", -30.0, 30.0, 0.0, 1.0, key=f"{pfx}_dr_dadd",
                             help="Cents per bushel Dorans bids above (+) or below (-) the others, on top of the haul.")
     t1, t2 = st.columns(2)
-    inc_pl = t1.checkbox("Compete against ethanol / crush plants", True, key="il_dr_plants")
-    inc_ot = t2.checkbox("Compete against the other shipper-list candidates", False, key="il_dr_cand")
+    inc_pl = t1.checkbox("Compete against ethanol / crush plants", True, key=f"{pfx}_dr_plants")
+    inc_ot = t2.checkbox("Compete against the other shipper-list candidates", False, key=f"{pfx}_dr_cand")
 
     nodes = [{"name": "Dorans", "lat": nf.DORANS["lat"], "lon": nf.DORANS["lon"], "adder": d_add, "kind": "Dorans", "miles": 0}]
     for r in comp_rows:
@@ -48,7 +48,7 @@ def render(crop: str, year: int, key: str, cdf, comp_rows: list, plants: list, e
     with st.expander("Competitor bid adders (¢/bu vs Dorans)", expanded=False):
         base = pd.DataFrame({"Buyer": [n["name"] for n in nodes[1:]], "Type": [n["kind"] for n in nodes[1:]], "Miles": [n["miles"] for n in nodes[1:]],
                              "Adder (¢/bu)": [0.0] * (len(nodes) - 1)})
-        ed = st.data_editor(base, hide_index=True, use_container_width=True, disabled=["Buyer", "Type", "Miles"], key=f"il_dr_adders_{crop}_{len(nodes)}")
+        ed = st.data_editor(base, hide_index=True, use_container_width=True, disabled=["Buyer", "Type", "Miles"], key=f"{pfx}_dr_adders_{crop}_{len(nodes)}")
         for n, a in zip(nodes[1:], ed["Adder (¢/bu)"]):
             n["adder"] = float(a or 0.0)
         st.caption("Positive = that buyer bids that many cents better than the others at the elevator door; its haul cost still applies.")
@@ -66,7 +66,7 @@ def render(crop: str, year: int, key: str, cdf, comp_rows: list, plants: list, e
 
     fig = nf.territory_fig(lat["lat"], lat["lon"], res["share"][:, 0], bu, nodes, geo, crop, year, extent)
     fig.update_layout(dragmode=False)
-    st.plotly_chart(fig, use_container_width=True, key="il_territory_map", config={"scrollZoom": False, "displayModeBar": False, "doubleClick": False})
+    st.plotly_chart(fig, use_container_width=True, key=f"{pfx}_territory_map", config={"scrollZoom": False, "displayModeBar": False, "doubleClick": False})
     st.caption("A micro version of the NASS / RMA Draw Territory: each ~4 mile dot sends its county's grain to the buyers in reach in proportion to "
                "exp(-net cost / crossover). Only the buyers on the Competition map (and the plants above) exist in the model, so the edges overstate Dorans' share "
                "where an unlisted buyer sits closer." + (" Forecast year: county grain is USDA's state estimate x 3-year shares." if is_fc else ""))
