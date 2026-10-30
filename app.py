@@ -49,15 +49,34 @@ if not st.session_state.get("_authed"):
     st.stop()
 
 st.markdown("""<style>
-html, body, [class*="css"], h1, h2, h3, h4 { font-family: "Source Sans Pro", system-ui, sans-serif; }
-.dash-header { text-align:center; padding:10px 0 12px; border-bottom:3px solid #0693e3; margin-bottom:14px; }
-.dash-header h1 { margin:0; font-size:1.7rem; color:#32373c; }
-.dash-header p { margin:2px 0 0; color:#6b7280; font-size:0.95rem; }
+@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:wght@500;600&family=Source+Sans+3:wght@400;600;700&display=swap');
+html, body, [data-testid="stAppViewContainer"] { background-color:#f6f8f7; color:#32373c; }
+html, body, p, span, div, label, button, td, th { font-family:'Source Sans 3','Source Sans Pro',sans-serif; }
+.block-container { padding-top: 3.2rem; max-width: 1400px; }
+.dash-header { display:flex; align-items:center; gap:18px; padding-bottom:10px; border-bottom:1px solid #d7e2dc; margin-bottom:14px; }
+.dash-header img { height:40px; }
+.dash-header .t b { font-family:'EB Garamond',Georgia,serif; font-size:1.7rem; color:#32373c; font-weight:600; }
+.dash-header .t div { font-size:.85rem; color:#5f7267; }
+@media (max-width: 640px) { .dash-header img { display:none; } }
+[data-testid="stMetric"] { background:#fff; border:1px solid #d7e2dc; border-top:3px solid #5e7164; border-radius:10px; padding:12px 16px; text-align:center; }
+[data-testid="stMetricLabel"] { justify-content:center; color:#5f7267; text-transform:uppercase; letter-spacing:.08em; font-size:.68rem; }
+[data-testid="stMetricValue"] { justify-content:center; color:#32373c; font-weight:700; font-size:1.5rem; }
+[data-testid="stMetricValue"] div { overflow:visible; text-overflow:clip; }
+[data-testid="stMetricDelta"] { justify-content:center; }
+h5, h6 { color:#5f7267; text-transform:uppercase; letter-spacing:.1em; font-size:.74rem !important; padding:10px 0 4px; border-bottom:1px solid #d7e2dc; margin-bottom:12px; }
+hr { border-color:#d7e2dc; }
+.stTabs [data-baseweb="tab-list"] { border-bottom:1px solid #d7e2dc; }
+#MainMenu, footer { visibility:hidden; }
+.stDeployButton { display:none; }
 </style>
-<div class="dash-header"><h1>Dorans Merchandising Portal</h1><p>Farmers Grain Co of Dorans · Mattoon, IL</p></div>""", unsafe_allow_html=True)
+<div class="dash-header">
+  <img src="https://www.jpsi.com/wp-content/themes/gate39media/img/logo-full.png">
+  <div class="t"><b>Dorans Merchandising Portal</b>
+  <div>Farmers Grain Co of Dorans &middot; Mattoon, IL &middot; John Stewart &amp; Associates</div></div>
+</div>""", unsafe_allow_html=True)
 
 st.markdown(
-    "<p style='text-align:center;color:#6b7280;font-size:0.78rem;margin:-6px 0 8px 0'>Basis, processor and rail bids come from the "
+    "<p style='color:#5f7267;font-size:0.78rem;margin:-6px 0 8px 0'>Basis, processor and rail bids come from the "
     "<a href='https://basis-tracker-view.streamlit.app' target='_blank'>Basis Tracker view</a> data only: the same archive and the same hidden markets "
     "the view build shows.</p>", unsafe_allow_html=True)
 
