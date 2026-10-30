@@ -107,10 +107,56 @@ def _draw(d, plants, prod, geo, last, est) -> None:
     territory_tab.render(crop, year, "production", cdf, d["rows"], plants, extent, year == est, pfx="comp")
 
 
+CN_MARKETS = [("CN 105s", "CN 105s corn"), ("CN 105s Beans", "CN 105s soybeans"), ("CN 25's", "CN 25's corn")]
+
+
+def cn_front_bids() -> tuple:
+    """({market: (as-of day, front period, bid cents, futures)}, note) from the rail bid archive (the same read as the CN tabs); empty with a note when it isn't connected."""
+    import rail_data as RD
+    if not RD.configured():
+        return {}, "CN bids aren't shown: the rail bid archive isn't connected here (see the CN Rail FOB tab)."
+    try:
+        import cn_sheet
+        all_rows = cn_sheet._cached_bids()
+        out = {}
+        for m, _ in CN_MARKETS:
+            cells, day = cn_sheet._latest_cells(all_rows, m)
+            ps = [p for p in cn_sheet._ordered(cells) if cells[p].get("bid") is not None]
+            if ps:
+                c = cells[ps[0]]
+                out[m] = (str(day), ps[0], c["bid"], c.get("futures"))
+        return out, "" if out else "No CN bids posted yet."
+    except Exception as e:
+        return {}, f"CN bids couldn't be read ({e})."
+
+
+def _cn_market(r) -> str | None:
+    """Which CN bid applies to a competitor: 105-car points the 105s bid, smaller CN loaders (25 / 50 cars) the 25's bid."""
+    cn = next((x for x in (r.get("rail") or []) if x.startswith("CN:")), None)
+    if not cn:
+        return None
+    return "CN 105s" if cn.startswith("CN: 105") else "CN 25's"
+
+
+def _fmt_bid(b) -> str:
+    return "" if not b else f"{b[2]:+.0f} {b[1]}" + (f" ({b[3]})" if b[3] else "")
+
+
 def _competitor_list(rows) -> None:
     import streamlit as st
 
+    bids, note = cn_front_bids()
+    if bids:
+        cols = st.columns(len(CN_MARKETS))
+        for col, (m, lbl) in zip(cols, CN_MARKETS):
+            b = bids.get(m)
+            col.metric(f"{lbl} (front month)", f"{b[2]:+.0f}¢ {b[1]}" if b else "—", f"posted {b[0]}, vs {b[3]}" if b and b[3] else (f"posted {b[0]}" if b else None), delta_color="off")
+        st.caption("CN bids are FOB Champaign (the 25's taken as the same), cents vs the futures month shown. Each CN-served competitor is matched to the bid for its loading size: "
+                   "105-car points to the 105s bid, 25 / 50-car points to the 25's bid.")
+    elif note:
+        st.caption(note)
     with st.expander("Competitor list"):
         st.dataframe(pd.DataFrame([{"Name": r["name"], "Type": r["kind"], "Place": r["place"], "Miles from Dorans": r["miles"], "Named": "yes" if r["confirmed"] else "",
                                     "Rail access / loading capacity": "; ".join(r.get("rail") or []) + ((" | " if r.get("rail") else "") + r["company_rail"] if r.get("company_rail") else ""),
+                                    **({"CN bid that applies (front month)": f"{_cn_market(r)}: {_fmt_bid(bids.get(_cn_market(r)))}" if _cn_market(r) and bids.get(_cn_market(r)) else ""} if bids else {}),
                                     "Location source": r["source"]} for r in rows]), hide_index=True, use_container_width=True)
