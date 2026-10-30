@@ -119,6 +119,9 @@ def _cell(v):
     return f'<td class="{"neg" if v < 0 else ""}">{t}</td>'
 
 
+VIEW_URL = "https://rail-fob-view-only.streamlit.app/"
+
+
 def render() -> None:
     import streamlit as st
     import rail_data as RD
@@ -128,8 +131,10 @@ def render() -> None:
     st.caption("CN 105s bids (FOB Champaign) carried to the Dorans area: bid + freight(Champaign) − freight(origin), cents/bu. "
                "Freight = CN tariff at the month's USDA level + CN fuel surcharge on estimated rail miles, ÷ bushels per car.")
     if not RD.configured():
-        st.info("The rail bid archive isn't connected yet. Set `USE_SNOWFLAKE = 1` and the `SNOWFLAKE_*` secrets (a role that can read "
-                "`JSA.BASIS_TRACKER`) to show the CN 105s bids here.")
+        st.info("The rail bid archive isn't connected here, so this shows the Rail FOB view-only app "
+                f"([open it in its own tab]({VIEW_URL})). Set `USE_SNOWFLAKE = 1` and the `SNOWFLAKE_*` secrets to build the Dorans sheet from the archive instead.")
+        import streamlit.components.v1 as components
+        components.iframe(VIEW_URL + "?embed=true", height=900, scrolling=True)
         return
 
     c1, c2, c3, c4 = st.columns([1, 1, 1, 1.4])
