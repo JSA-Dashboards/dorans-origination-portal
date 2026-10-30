@@ -69,6 +69,21 @@ for p in pts["shipper"]:
 for k, label in (("crush", "Soy crush plant"), ("ethanol", "Ethanol / corn processor")):
     for p in pts[k]:
         add(p["name"], p["state"], p["lat"], p["lon"], label, "NASS/RMA map lists", p.get("city", ""))
+# Rail access and loading capacity, from the Rail Origins & Destinations directories (CN origins, UP shuttle list, NS loaders, CSX shippers) and what Kolten told me
+# (2026-10-29: ADM can hit CN, CSX and UP, Oakland too). Cars = the loading size as the railroad's list shows it; a blank means no directory lists the site.
+RAIL = {
+    "ADM Tuscola": ["CN: 105 cars (CN origins list)", "UP: 110-car shuttle origin (UP 4052-A list, Oct 2023)"],
+    "ADM Oakland, IL": ["CN: 105 cars (CN origins list)"],
+    "TGM Arcola": ["CN: 50 cars (CN origins list) - not a 105-car point"],
+    "TGM Neoga": ["CN: 105 cars (CN origins list)", "NS: 20-car track, 817,000 bu storage, not a unit-train loader (NS list)"],
+    "Primient Coles": ["CN: 50 cars (CN origins list, listed as Premient)"],
+    "Primient Mattoon": ["CN: 50 cars (CN origins list, listed as Premient)"],
+    "Total Grain Marketing Casey, IL": ["CSX: express service (CSX list)"],
+}
+COMPANY_RAIL = {"ADM": "ADM can reach CN, CSX and UP (Kolten); Decatur is also a CSX unit-train and NS 120-car loader"}
+for o in out:
+    o["rail"] = RAIL.get(o["name"], [])
+    o["company_rail"] = COMPANY_RAIL.get(o["name"].split()[0], "")
 out.sort(key=lambda o: (not o["confirmed"], o["miles"] if o["miles"] is not None else 999))
 json.dump(dict(dorans=dict(name="Farmers Grain Co of Dorans", lat=DORANS[0], lon=DORANS[1]), radius=RADIUS, rows=out),
           open(Path(__file__).parent / "data" / "competitors.json", "w", encoding="utf-8"), indent=1)

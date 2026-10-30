@@ -167,6 +167,11 @@ _COMP = {"named": ("Competing elevators (named)", "#dc2626", 13), "truck": ("Ele
          "other": ("Other shipper / plant candidates", "#9aa5b1", 8)}
 
 
+def _rail_hover(p: dict) -> str:
+    bits = list(p.get("rail") or []) + ([p["company_rail"]] if p.get("company_rail") else [])
+    return ("<br><i>Rail:</i> " + "<br>".join(bits)) if bits else ""
+
+
 def add_competition(fig, rows: list) -> int:
     n = 0
     groups = {"named": [r for r in rows if r["confirmed"]], "truck": [r for r in rows if not r["confirmed"] and r.get("truck")],
@@ -179,7 +184,7 @@ def add_competition(fig, rows: list) -> int:
         fig.add_trace(go.Scattergeo(
             lon=[p["lon"] for p in pts], lat=[p["lat"] for p in pts], mode="markers", name=label,
             marker=dict(symbol="circle", size=size, color=color, line=dict(color="white", width=1.4)),
-            text=[f"<b>{p['name']}</b><br>{p['kind']}<br>{p['place']}<br>{p['miles']} mi from Dorans" for p in pts],
+            text=[f"<b>{p['name']}</b><br>{p['kind']}<br>{p['place']}<br>{p['miles']} mi from Dorans" + _rail_hover(p) for p in pts],
             hovertemplate="%{text}<extra></extra>", showlegend=True))
         n += len(pts)
     return n

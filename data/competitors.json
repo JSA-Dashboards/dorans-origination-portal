@@ -16,7 +16,11 @@
    "kind": "Elevator",
    "confirmed": true,
    "truck": true,
-   "miles": 6.8
+   "miles": 6.8,
+   "rail": [
+    "CN: 50 cars (CN origins list, listed as Premient)"
+   ],
+   "company_rail": ""
   },
   {
    "name": "Primient Coles",
@@ -28,7 +32,11 @@
    "kind": "Elevator",
    "confirmed": true,
    "truck": true,
-   "miles": 7.1
+   "miles": 7.1,
+   "rail": [
+    "CN: 50 cars (CN origins list, listed as Premient)"
+   ],
+   "company_rail": ""
   },
   {
    "name": "TGM Arcola",
@@ -40,7 +48,11 @@
    "kind": "Elevator",
    "confirmed": true,
    "truck": true,
-   "miles": 9.3
+   "miles": 9.3,
+   "rail": [
+    "CN: 50 cars (CN origins list) - not a 105-car point"
+   ],
+   "company_rail": ""
   },
   {
    "name": "ADM Sullivan",
@@ -52,7 +64,9 @@
    "kind": "Elevator",
    "confirmed": true,
    "truck": true,
-   "miles": 14.2
+   "miles": 14.2,
+   "rail": [],
+   "company_rail": "ADM can reach CN, CSX and UP (Kolten); Decatur is also a CSX unit-train and NS 120-car loader"
   },
   {
    "name": "TGM Neoga",
@@ -64,7 +78,12 @@
    "kind": "Elevator",
    "confirmed": true,
    "truck": true,
-   "miles": 17.2
+   "miles": 17.2,
+   "rail": [
+    "CN: 105 cars (CN origins list)",
+    "NS: 20-car track, 817,000 bu storage, not a unit-train loader (NS list)"
+   ],
+   "company_rail": ""
   },
   {
    "name": "ADM Tuscola",
@@ -76,7 +95,12 @@
    "kind": "Elevator",
    "confirmed": true,
    "truck": true,
-   "miles": 17.4
+   "miles": 17.4,
+   "rail": [
+    "CN: 105 cars (CN origins list)",
+    "UP: 110-car shuttle origin (UP 4052-A list, Oct 2023)"
+   ],
+   "company_rail": "ADM can reach CN, CSX and UP (Kolten); Decatur is also a CSX unit-train and NS 120-car loader"
   },
   {
    "name": "Total Grain Marketing Fairgrange, IL",
@@ -88,7 +112,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 9.4
+   "miles": 9.4,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Total Grain Marketing Windsor, IL",
@@ -100,7 +126,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 15.9
+   "miles": 15.9,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "ADM Oakland, IL",
@@ -112,7 +140,11 @@
    "kind": "Rail Terminal (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 18.6
+   "miles": 18.6,
+   "rail": [
+    "CN: 105 cars (CN origins list)"
+   ],
+   "company_rail": "ADM can reach CN, CSX and UP (Kolten); Decatur is also a CSX unit-train and NS 120-car loader"
   },
   {
    "name": "Total Grain Marketing Lovington, IL",
@@ -124,7 +156,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 19.1
+   "miles": 19.1,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Topflight Grain Cooperative",
@@ -136,7 +170,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 19.7
+   "miles": 19.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Total Grain Marketing Ingraham, IL",
@@ -148,7 +184,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 20.1
+   "miles": 20.1,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Total Grain Marketing Kansas, IL",
@@ -160,7 +198,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 21.7
+   "miles": 21.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Primient Findlay",
@@ -172,7 +212,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 21.9
+   "miles": 21.9,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Total Grain Marketing Middlesworth, IL",
@@ -184,7 +226,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 22.0
+   "miles": 22.0,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Total Grain Marketing Greenup, IL",
@@ -196,7 +240,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 23.3
+   "miles": 23.3,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Total Grain Marketing Stewardson, IL",
@@ -208,7 +254,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 24.9
+   "miles": 24.9,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Bunge Maschhoff's",
@@ -220,7 +268,9 @@
    "kind": "Corn Processing (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 25.7
+   "miles": 25.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Total Grain Marketing Shelbyville, IL",
@@ -232,7 +282,9 @@
    "kind": "Country Elevator (bids in tracker)",
    "confirmed": false,
    "truck": true,
-   "miles": 27.0
+   "miles": 27.0,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Adm",
@@ -244,7 +296,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 28.4
+   "miles": 28.4,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Top Flite Grain Co",
@@ -256,7 +310,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 28.4
+   "miles": 28.4,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Littlejohn Grain Inc",
@@ -268,7 +324,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 28.8
+   "miles": 28.8,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Siemer Milling Co",
@@ -280,7 +338,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 29.8
+   "miles": 29.8,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Grand Prairie Coop",
@@ -292,7 +352,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 30.7
+   "miles": 30.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Cargill Illinois Cereal Mills Div.",
@@ -304,7 +366,9 @@
    "kind": "Ethanol / corn processor",
    "confirmed": false,
    "truck": false,
-   "miles": 35.2
+   "miles": 35.2,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Top Flight Grain Co",
@@ -316,7 +380,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 35.5
+   "miles": 35.5,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Adm Growmark Inc",
@@ -328,7 +394,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 37.7
+   "miles": 37.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Archer Daniels Midland E Elev",
@@ -340,7 +408,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 37.7
+   "miles": 37.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Tate & Lyle Ingredients Inc",
@@ -352,7 +422,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 37.7
+   "miles": 37.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Archer Daniels Midland Co.",
@@ -364,7 +436,9 @@
    "kind": "Soy crush plant",
    "confirmed": false,
    "truck": false,
-   "miles": 37.7
+   "miles": 37.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Archer Daniels Midland",
@@ -376,7 +450,9 @@
    "kind": "Ethanol / corn processor",
    "confirmed": false,
    "truck": false,
-   "miles": 37.7
+   "miles": 37.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Tate & Lyle North Amer.",
@@ -388,7 +464,9 @@
    "kind": "Ethanol / corn processor",
    "confirmed": false,
    "truck": false,
-   "miles": 37.7
+   "miles": 37.7,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Bunge Milling Homer Elevator",
@@ -400,7 +478,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 39.1
+   "miles": 39.1,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "The Andersons Inc",
@@ -412,7 +492,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 39.1
+   "miles": 39.1,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Assumption Grain Coop",
@@ -424,7 +506,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 41.2
+   "miles": 41.2,
+   "rail": [],
+   "company_rail": ""
   },
   {
    "name": "Mont Eagle Mills Inc",
@@ -436,7 +520,9 @@
    "kind": "Elevator / shipper",
    "confirmed": false,
    "truck": false,
-   "miles": 44.5
+   "miles": 44.5,
+   "rail": [],
+   "company_rail": ""
   }
  ]
 }

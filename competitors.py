@@ -82,4 +82,5 @@ def render() -> None:
 
     with st.expander("Competitor list"):
         st.dataframe(pd.DataFrame([{"Name": r["name"], "Type": r["kind"], "Place": r["place"], "Miles from Dorans": r["miles"], "Named": "yes" if r["confirmed"] else "",
+                                    "Rail access / loading capacity": "; ".join(r.get("rail") or []) + ((" | " if r.get("rail") else "") + r["company_rail"] if r.get("company_rail") else ""),
                                     "Location source": r["source"]} for r in rows]), hide_index=True, use_container_width=True)
