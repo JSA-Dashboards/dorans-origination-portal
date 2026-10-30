@@ -76,7 +76,7 @@ RAIL = {
     "ADM Oakland, IL": ["CN: 105 cars (CN origins list)"],
     "TGM Arcola": ["CN: 50 cars (CN origins list) - not a 105-car point"],
     "TGM Neoga": ["CN: 105 cars (CN origins list)", "NS: 20-car track, 817,000 bu storage, not a unit-train loader (NS list)"],
-    "Primient Coles": ["CN: 50 cars (CN origins list, listed as Premient)"],
+    "Primient Coles": ["CN: 25-car loader (Kolten, 2026-10-29); the CN origins list shows Coles at 50 cars (listed as Premient)"],
     "Primient Mattoon": ["CN: 50 cars (CN origins list, listed as Premient)"],
     "Total Grain Marketing Casey, IL": ["CSX: express service (CSX list)"],
 }
