@@ -80,7 +80,7 @@ st.markdown(
     "<a href='https://basis-tracker-view.streamlit.app' target='_blank'>Basis Tracker view</a> data only: the same archive and the same hidden markets "
     "the view build shows.</p>", unsafe_allow_html=True)
 
-tab_prod, tab_share, tab_comp, tab_proc, tab_cn, tab_seas = st.tabs(["🌽 IL Production", "📊 Market Share", "📍 Competition", "🏭 Processors", "🚂 CN Rail FOB", "📈 CN Seasonals"])
+tab_prod, tab_share, tab_comp, tab_proc, tab_cn, tab_seas, tab_offer = st.tabs(["🌽 IL Production", "📊 Market Share", "📍 Competition", "🏭 Processors", "🚂 CN Rail FOB", "📈 CN Seasonals", "💼 Offer Portal"])
 with tab_prod:
     production_tab.render()
 with tab_share:
@@ -93,3 +93,9 @@ with tab_cn:
     cn_sheet.render()
 with tab_seas:
     cn_seasonals.render()
+with tab_offer:
+    OFFER_URL = "https://jsa-offer-app.streamlit.app/?t=dorans"
+    st.markdown("##### Dorans Offer Portal")
+    st.write("Farmer offers, bids and contracts for Farmers Grain Co of Dorans run in the JSA Offer Portal, a separate app with its own sign-in.")
+    st.link_button("Open the Dorans Offer Portal", OFFER_URL, type="primary")
+    st.caption(OFFER_URL)
