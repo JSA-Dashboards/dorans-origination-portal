@@ -67,12 +67,17 @@ def render() -> None:
         recs = R.by_crop_year(rec, r_crop)
         years = [int(y) for y in recs if int(y) <= (est or last)]
         pr = _production_by_year(prod, geo, crop, fips, years)
+        ship = R.ship_by_crop_year(rec, r_crop)
         rows = []
         for y in years:
             bu, kind = recs[str(y)]
             p, filled = pr[y]
+            tr, rl = ship.get(str(y), (None, None))
+            out = (tr or 0) + (rl or 0)
             rows.append({"Crop year": y, "FYE": f"FYE {str(y + 1)[-2:]}", "Dorans receipts (bu)": bu, "Basis": kind, "County production (bu)": p,
-                         "Filled": "est" if filled else "", "Share (%)": R.share(bu, p) if kind != "to date" and y <= last else None})
+                         "Filled": "est" if filled else "", "Share (%)": R.share(bu, p) if kind != "to date" and y <= last else None,
+                         "Shipped by truck (bu)": tr, "Shipped by rail (bu)": rl, "Rail % of shipments": (rl / out * 100 if out and rl is not None else None),
+                         "Shipped as % of receipts": (out / bu * 100 if out and bu and kind == "total" else None)})
         df = pd.DataFrame(rows)
         summary[crop] = df
         with col:
@@ -94,11 +99,30 @@ def render() -> None:
             fig.update_yaxes(title_text="M bu", gridcolor="#e2e8f0", secondary_y=False)
             fig.update_yaxes(title_text="% share", showgrid=False, secondary_y=True, rangemode="tozero")
             st.plotly_chart(fig, use_container_width=True)
+            sh = df[df["Rail % of shipments"].notna() & (df["Basis"] != "to date")]
+            if len(sh):
+                st.markdown(f"**{crop}: rail vs truck**")
+                last_sh = sh.iloc[-1]
+                avg5 = sh.tail(5)["Rail % of shipments"].mean()
+                n1, n2 = st.columns(2)
+                n1.metric(f"{int(last_sh['Crop year'])} by rail", f"{last_sh['Rail % of shipments']:.0f}%", f"{100 - last_sh['Rail % of shipments']:.0f}% by truck", delta_color="off")
+                n2.metric(f"{min(5, len(sh))}-yr avg by rail", f"{avg5:.0f}%")
+                f2 = make_subplots(specs=[[{"secondary_y": True}]])
+                f2.add_trace(go.Bar(x=sh["Crop year"], y=sh["Shipped by rail (bu)"] / 1e6, name="Rail", marker_color="#0693e3"), secondary_y=False)
+                f2.add_trace(go.Bar(x=sh["Crop year"], y=sh["Shipped by truck (bu)"] / 1e6, name="Truck", marker_color="#f59e0b"), secondary_y=False)
+                f2.add_trace(go.Scatter(x=sh["Crop year"], y=sh["Rail % of shipments"], name="Rail %", mode="lines+markers", line=dict(color="#32373c", width=3)), secondary_y=True)
+                f2.update_layout(barmode="stack", height=300, margin=dict(l=0, r=0, t=10, b=0), paper_bgcolor="#fff", plot_bgcolor="#fff", legend=dict(orientation="h", y=-0.2),
+                                 xaxis=dict(dtick=1))
+                f2.update_yaxes(title_text="M bu shipped", gridcolor="#e2e8f0", secondary_y=False)
+                f2.update_yaxes(title_text="% by rail", range=[0, 100], showgrid=False, secondary_y=True)
+                st.plotly_chart(f2, use_container_width=True)
 
     st.caption(f"Benchmark: {label} County production (NASS, withheld years filled as on the IL Production tab; 'est' = a filled year). Dorans receipts from the {src}. "
                "Crop year = the harvest; the workbook's FYE n is the fiscal year ending Aug of n, i.e. crop n-1 (FYE 25 = fall 2024 + the after-harvest receipts). "
                f"Crop 2025 = its fall harvest + after-harvest receipts (the sheet's FYE 26 cell actually points at the Fall 26 column, so it is not used); "
-               f"{est or last + 1} is the harvest received so far against a forecast, so it has no share yet.")
+               f"{est or last + 1} is the harvest received so far against a forecast, so it has no share yet. Shipments (rail vs truck) are the workbook's TOTAL SHIPMENTS block, "
+               "FYE n mapped to crop n-1 like the receipts; it has no crop 2025 figures (that column is the current year to date), and shipped bushels can exceed the year's receipts "
+               "when stored grain is drawn down.")
 
     st.markdown("##### By year")
     year_tbl = []
@@ -109,7 +133,9 @@ def render() -> None:
     allt = pd.concat(year_tbl).sort_values(["Crop", "Crop year"], ascending=[True, False])
     st.dataframe(allt, hide_index=True, use_container_width=True,
                  column_config={"Dorans receipts (bu)": st.column_config.NumberColumn(format="%d"), "County production (bu)": st.column_config.NumberColumn(format="%d"),
-                                "Share (%)": st.column_config.NumberColumn(format="%.1f"), "Crop year": st.column_config.NumberColumn(format="%d")})
+                                "Share (%)": st.column_config.NumberColumn(format="%.1f"), "Crop year": st.column_config.NumberColumn(format="%d"),
+                                "Shipped by truck (bu)": st.column_config.NumberColumn(format="%d"), "Shipped by rail (bu)": st.column_config.NumberColumn(format="%d"),
+                                "Rail % of shipments": st.column_config.NumberColumn(format="%.0f%%"), "Shipped as % of receipts": st.column_config.NumberColumn(format="%.0f%%")})
 
     st.markdown("##### Each county, one crop year")
     d1, d2 = st.columns(2)

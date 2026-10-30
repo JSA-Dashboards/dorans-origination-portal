@@ -49,7 +49,24 @@ def parse_xlsx(path_or_file) -> dict:
         return out, cols
     total_b, _ = block("TOTAL RECEIPTS", "HARVEST RECEIPTS")
     harv_b, _ = block("HARVEST RECEIPTS", "TOTAL SHIPMENTS")
-    out = {"total": {}, "harvest": {}, "after": {}}
+    out = {"total": {}, "harvest": {}, "after": {}, "ship": {}}
+    # shipments: TOTAL SHIPMENTS block, CORN then its TRUCK / RAIL rows, BEANS then its TRUCK / RAIL rows; columns FYE / FY n
+    top = find("TOTAL SHIPMENTS")
+    hdr = rows[top + 1]
+    scols = {j: int(re.sub(r"\D", "", str(h))) for j, h in enumerate(hdr) if isinstance(h, str) and re.fullmatch(r"(FYE|FY)\s*\d+", h.strip(), re.I)}
+    crop = None
+    for i in range(top + 2, min(top + 14, ws.max_row + 1)):
+        lab = str(rows[i][0] or "").strip().upper()
+        if lab in ("CORN", "BEANS"):
+            crop = "Corn" if lab == "CORN" else "Soybeans"
+        elif lab in ("TRUCK", "RAIL") and crop:
+            d = out["ship"].setdefault(crop, {}).setdefault(lab.lower(), {})
+            for j, n in scols.items():
+                v = _num(rows[i][j])
+                if v is not None:
+                    d[str(2000 + n - 1 if n <= 25 else 2000 + n)] = v         # FYE n = crop n-1; the newest column is the current year to date (crop 2026)
+        elif lab.startswith("AFTER HARVEST"):
+            break
     for lab, d in total_b.items():
         for crop, vals in d.items():
             if lab in ("CORN", "BEANS"):
@@ -88,6 +105,13 @@ def by_crop_year(rec: dict, crop: str) -> dict:
         else:
             out[y] = (harv[y], "to date")
     return dict(sorted(out.items()))
+
+
+def ship_by_crop_year(rec: dict, crop: str) -> dict:
+    """{crop year: (truck bu, rail bu)} from the shipments block. Truck + rail is the total used (the sheet's hard-coded corn totals differ slightly in some years)."""
+    d = rec.get("ship", {}).get(crop, {})
+    years = sorted(set(d.get("truck", {})) | set(d.get("rail", {})))
+    return {y: (d.get("truck", {}).get(y, 0.0), d.get("rail", {}).get(y, 0.0)) for y in years}
 
 
 def share(receipts: float, production: float):
