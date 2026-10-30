@@ -92,6 +92,24 @@ def week_label(w: int) -> str:
 
 
 # ── drawing ──────────────────────────────────────────────────────────────────────────────────────────────────────
+# The Basis Tracker's Rail FOB seasonal chart: month labels on the x axis (the marketing year starts Sep = week 1), gray true-range band, faded older
+# years, last year blue, the Olympic average amber dashed, this year thick black, the latest rundown as a dashed black forward curve, futures-month rules.
+MON_WK = {9: 1, 10: 5, 11: 10, 12: 14, 1: 18, 2: 23, 3: 27, 4: 31, 5: 36, 6: 40, 7: 45, 8: 49}
+MON_LAB = {1: "Sep", 5: "Oct", 10: "Nov", 14: "Dec", 18: "Jan", 23: "Feb", 27: "Mar", 31: "Apr", 36: "May", 40: "Jun", 45: "Jul", 49: "Aug"}
+FUT_RULES = {13: "Z", 27: "H", 35: "K", 44: "N"}
+OLD_COLORS = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac"]
+
+
+def forward_curve(rows: list, market: str) -> dict:
+    """{marketing week: bid} of the market's latest posting, one value per delivery month (the tracker's forward-month rule)."""
+    sel = [r for r in rows if r["market"] == market and r.get("bid") is not None and not _spread_note(r["period"])]
+    if not sel:
+        return {}
+    d = max(r["date"] for r in sel)
+    bm = PER.by_month([[r["period"], r.get("futures"), r["bid"]] for r in sel if r["date"] == d])
+    return {MON_WK[m]: v[0] for m, v in bm.items() if m in MON_WK}
+
+
 def render(all_rows: list) -> None:
     import plotly.graph_objects as go
     import streamlit as st
@@ -114,33 +132,62 @@ def render(all_rows: list) -> None:
     pts = [(d, v) for b, d, v in rb if b == pd_sel]
     by_year = weekly(pts)
     cur = max(by_year)
-    today_my = date.today().year if date.today().month >= 9 else date.today().year - 1
+    today = date.today()
+    today_my = today.year if today.month >= 9 else today.year - 1
     window = [y for y in range(today_my - 5, today_my) if y in by_year]
     band = olympic_band(by_year, window)
+    lab = lambda y: f"{y}/{str(y + 1)[-2:]}"
+    avg_lbl = f"{len(window)}-yr Olympic avg" if len(window) >= 4 else f"{len(window)}-yr avg"
 
     fig = go.Figure()
+    for w, code in FUT_RULES.items():
+        fig.add_vline(x=w, line=dict(color="#cbd5e1", width=1.5))
+        fig.add_annotation(x=w, y=1, yref="paper", text=code, showarrow=False, yanchor="top", font=dict(size=12, color="#94a3b8"))
+    fig.add_hline(y=0, line=dict(color="#94a3b8", width=1, dash="dash"))
     if band:
         ws = sorted(band)
         fig.add_trace(go.Scatter(x=ws + ws[::-1], y=[band[w][2] for w in ws] + [band[w][1] for w in ws[::-1]], fill="toself",
-                                 fillcolor="rgba(217,119,6,0.12)", line=dict(width=0), hoverinfo="skip", name=f"{len(window)}-yr range"))
-        fig.add_trace(go.Scatter(x=ws, y=[band[w][0] for w in ws], mode="lines", name=f"{len(window)}-yr Olympic avg",
-                                 line=dict(color="#d97706", width=2, dash="dash")))
-    for y, wks in by_year.items():
-        if y == cur or y == cur - 1 or y not in window:
-            continue
-        fig.add_trace(go.Scatter(x=list(wks), y=list(wks.values()), mode="lines", name=f"{y}/{str(y + 1)[-2:]}", line=dict(width=1, color="#c3ccd6")))
-    for y, color, width in ((cur - 1, "#2563eb", 2.5), (cur, "#32373c", 3.5)):
-        if y in by_year:
-            wks = by_year[y]
-            fig.add_trace(go.Scatter(x=list(wks), y=list(wks.values()), mode="lines+markers" if y == cur else "lines", name=f"{y}/{str(y + 1)[-2:]}",
-                                     line=dict(width=width, color=color), marker=dict(size=4)))
-    ticks = list(range(1, 53, 4))
-    fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0), paper_bgcolor="#fff", plot_bgcolor="#fff",
-                      yaxis=dict(title="¢/bu vs futures", gridcolor="#e2e8f0", zeroline=True, zerolinecolor="#94a3b8"),
-                      xaxis=dict(tickmode="array", tickvals=ticks, ticktext=[week_label(w) for w in ticks]), legend=dict(orientation="h", y=-0.15))
+                                 fillcolor="rgba(156,163,175,0.22)", line=dict(width=0), hoverinfo="skip", name=f"{len(window)}-yr range"))
+    old = [y for y in by_year if y < cur - 1]
+    for i, y in enumerate(old):
+        wks = by_year[y]
+        fig.add_trace(go.Scatter(x=list(wks), y=list(wks.values()), mode="lines", name=lab(y), opacity=0.5,
+                                 line=dict(width=1.3, color=OLD_COLORS[i % len(OLD_COLORS)]), hovertemplate=lab(y) + " wk %{x}: %{y:.1f}¢<extra></extra>"))
+    if cur - 1 in by_year:
+        wks = by_year[cur - 1]
+        fig.add_trace(go.Scatter(x=list(wks), y=list(wks.values()), mode="lines+text", name=lab(cur - 1), line=dict(width=4, color="#2563eb"),
+                                 text=[""] * (len(wks) - 1) + [lab(cur - 1)], textposition="middle right", textfont=dict(color="#2563eb", size=10),
+                                 hovertemplate=lab(cur - 1) + " wk %{x}: %{y:.1f}¢<extra></extra>"))
+    if band:
+        ws = sorted(band)
+        fig.add_trace(go.Scatter(x=ws, y=[band[w][0] for w in ws], mode="lines+text", name=avg_lbl, line=dict(color="#d97706", width=3, dash="dash"),
+                                 text=[""] * (len(ws) - 1) + [avg_lbl], textposition="middle right", textfont=dict(color="#d97706", size=10),
+                                 hovertemplate=avg_lbl + " wk %{x}: %{y:.1f}¢<extra></extra>"))
+    fwd = forward_curve(all_rows, mk)
+    if fwd:
+        twk = min(52, max(1, (today - date(today_my, 9, 1)).days // 7 + 1))
+        for seg, nm in (({w: v for w, v in fwd.items() if w >= twk}, "Forward curve"), ({w: v for w, v in fwd.items() if w < twk}, "Forward (next marketing year)")):
+            if seg:
+                ws = sorted(seg)
+                fig.add_trace(go.Scatter(x=ws, y=[seg[w] for w in ws], mode="lines+markers", name=nm, line=dict(color="#000", width=2, dash="dash"),
+                                         marker=dict(size=7, color="#000"), hovertemplate="Fwd bid wk %{x}: %{y:.0f}¢<extra></extra>"))
+    wks = by_year[cur]
+    fig.add_trace(go.Scatter(x=list(wks), y=list(wks.values()), mode="lines+text", name=lab(cur), line=dict(width=4, color="#000"),
+                             text=[""] * (len(wks) - 1) + [lab(cur)], textposition="middle right", textfont=dict(color="#000", size=10),
+                             hovertemplate=lab(cur) + " wk %{x}: %{y:.1f}¢<extra></extra>"))
+    comm = next((r.get("commodity") for r in all_rows if r["market"] == mk and r.get("commodity")), "")
+    st.markdown(
+        f'<div style="margin-top:8px;margin-bottom:2px;font-size:14px;color:#1e293b;font-weight:800">{mk} · {pd_sel}{" · " + comm if comm else ""}</div>'
+        '<div style="margin-bottom:4px;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.1em">Seasonal Bid — Marketing Year (Sep–Aug)'
+        f'&nbsp;&nbsp;<span style="font-weight:400;text-transform:none"><b style="color:#000">{lab(cur)} = black</b>'
+        + (f' · <b style="color:#2563eb">{lab(cur - 1)} = blue</b>' if cur - 1 in by_year else "")
+        + (f' · <b style="color:#d97706">{avg_lbl} = amber dash</b>' if band else "") + "</span></div>", unsafe_allow_html=True)
+    fig.update_layout(height=560, margin=dict(l=0, r=60, t=14, b=0), paper_bgcolor="#fff", plot_bgcolor="#fff", legend=dict(orientation="h", y=-0.08, font=dict(size=10)),
+                      yaxis=dict(title="Bid (¢)", gridcolor="#e2e8f0", zeroline=False),
+                      xaxis=dict(tickmode="array", tickvals=list(MON_LAB), ticktext=list(MON_LAB.values()), range=[1, 52], showgrid=False))
     st.plotly_chart(fig, use_container_width=True)
     first = min(d for d, _ in pts)
-    st.caption(f"{mk} · {pd_sel}: marketing years Sep–Aug, weekly means. Bold = {cur}/{str(cur + 1)[-2:]}, blue = last year"
-               + (f", dashed = the Olympic average of the last {len(window)} complete years with the full range shaded." if band else
-                  "; the 5-year band appears once two complete years are archived.")
-               + f" The archive's CN history starts {first:%b %Y}. Source: the Basis Tracker's rail archive.")
+    st.caption(f"{len(n[pd_sel])} postings · weekly average where a period was posted more than once. Black = {lab(cur)}, blue = {lab(cur - 1)}, "
+               + (f"amber dash = the Olympic average of the last {len(window)} complete years (each week's highest and lowest year dropped; under four years the plain mean) with their true range shaded gray; "
+                  if band else "the average and range appear once two complete years are archived; ")
+               + f"dashed black = the latest rundown by delivery month. The archive's CN history starts {first:%b %Y}. Source: the Basis Tracker's rail archive.")
