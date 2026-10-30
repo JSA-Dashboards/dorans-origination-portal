@@ -14,6 +14,7 @@ import freight_data as FD
 import cn_miles as CM
 
 MARKETS = {"Corn": "CN 105s", "Soybeans": "CN 105s Beans"}
+BID_MARKETS = {"Corn": ["CN 105s", "CN 25's"], "Soybeans": ["CN 105s Beans"]}   # one sheet per bid; the 25's is taken as FOB Champaign like the 105s
 DEFAULT_ORIGINS = [("DORANS", "IL"), ("MATTOON", "IL"), ("COLES", "IL"), ("CHAMPAIGN", "IL")]
 TOP_TIER = FD.CN_VOLUME_TIER_ORDER[-1]
 
@@ -155,35 +156,40 @@ def render() -> None:
     except Exception as e:
         st.error(f"Couldn't read the rail bid archive: {e}")
         return
-    cells, as_of = _latest_cells(all_rows, MARKETS[commodity])
-    periods = [p for p in _ordered(cells) if cells[p].get("bid") is not None and month_of(p)]
-    if not periods:
-        st.info(f"No {MARKETS[commodity]} bids posted yet.")
-        return
     champ = champaign_row(rows)
     if champ is None:
         st.error("The tariff has no Champaign, IL 105+ car rate to carry the bid from.")
         return
-
     weekly = _diesel()
     win = RF.window("CN", weekly, date.today()) if fsc_on else {}
-    uplift, fsc = uplift_and_fsc(periods, win, date.today())
-
-    hdr = "".join(f"<th>{p}<br><span style='font-weight:400;text-transform:none'>{cells[p].get('futures') or ''}</span></th>" for p in periods)
-    html = [CSS, '<div class="wrap"><table class="sheet"><tbody>', f'<tr><th class="l">Origin · tier</th>{hdr}</tr>']
-    html.append('<tr class="ref"><td class="lbl">CN 105s bid <span class="sub">(FOB Champaign)</span></td>'
-                + "".join(f'<td>{cells[p]["bid"]:+.0f}</td>' for p in periods) + "</tr>")
-    for r in sheet_rows(rows, origins, (size, source)):
-        vals = [fob(cells[p]["bid"], champ, r, size, field, commodity, month_of(p), fsc, uplift, fsc_on) for p in periods]
-        html.append(f'<tr><td class="lbl">{r["origin"].title()}, {r["state"]} <span class="fut-sub sub">{r["tier"]}</span></td>'
-                    + "".join(_cell(v) for v in vals) + "</tr>")
-    html.append("</tbody></table></div>")
-    st.markdown("".join(html), unsafe_allow_html=True)
+    as_ofs, shown = [], False
+    for mkt in BID_MARKETS[commodity]:
+        cells, as_of = _latest_cells(all_rows, mkt)
+        periods = [p for p in _ordered(cells) if cells[p].get("bid") is not None and month_of(p)]
+        if not periods:
+            st.info(f"No {mkt} bids posted yet.")
+            continue
+        shown = True
+        as_ofs.append(f"{mkt} {as_of}")
+        uplift, fsc = uplift_and_fsc(periods, win, date.today())
+        hdr = "".join(f"<th>{p}<br><span style='font-weight:400;text-transform:none'>{cells[p].get('futures') or ''}</span></th>" for p in periods)
+        html = [CSS, '<div class="wrap"><table class="sheet"><tbody>', f'<tr><th class="l">Origin · tier</th>{hdr}</tr>']
+        html.append(f'<tr class="ref"><td class="lbl">{mkt} bid <span class="sub">(FOB Champaign)</span></td>'
+                    + "".join(f'<td>{cells[p]["bid"]:+.0f}</td>' for p in periods) + "</tr>")
+        for r in sheet_rows(rows, origins, (size, source)):
+            vals = [fob(cells[p]["bid"], champ, r, size, field, commodity, month_of(p), fsc, uplift, fsc_on) for p in periods]
+            html.append(f'<tr><td class="lbl">{r["origin"].title()}, {r["state"]} <span class="fut-sub sub">{r["tier"]}</span></td>'
+                        + "".join(_cell(v) for v in vals) + "</tr>")
+        html.append("</tbody></table></div>")
+        st.markdown("".join(html), unsafe_allow_html=True)
+    if not shown:
+        return
+    as_of = "; ".join(as_ofs)
 
     miles = [f"{o.title()} {CM.miles_to_gulf(o, s)[0]:,.0f}" for o, s in origins if CM.miles_to_gulf(o, s)[0]]
     st.caption(f"Bids as of {as_of} (cents vs the futures month shown). {size} car ({FD.CN_BU_PER_CAR[commodity][size]:,} bu), "
                f"{source.lower()}-supplied. Rail miles to the Gulf (estimated): {', '.join(miles) or '—'}. "
-               "A tier below 105+ cars pays more freight, so a Dorans row sits below the Champaign bid by that difference plus its extra miles.")
+               "A tier below 105+ cars pays more freight, so a Dorans row sits below the Champaign bid by that difference plus its extra miles. The CN 25's bid is taken as FOB Champaign like the 105s (to confirm).")
 
 
 # cached readers (Streamlit's cache sits here so the pure functions above import without Streamlit)

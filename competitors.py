@@ -100,7 +100,7 @@ def _draw(d, plants, prod, geo, last, est) -> None:
     ysel = c2.selectbox("Production year", yopts, index=1 if est else 0, key="comp_dr_year")
     year = int(ysel.split()[0])
     extent = None
-    if c3.radio("Map extent", ["Illinois", "Dorans area"], horizontal=True, key="comp_dr_extent") == "Dorans area":
+    if c3.radio("Map extent", ["Illinois", "Dorans area"], index=1, horizontal=True, key="comp_dr_extent") == "Dorans area":
         extent = (nf.DORANS["lat"], nf.DORANS["lon"], c4.slider("Zoom radius (miles)", 25, 120, 60, 5, key="comp_dr_zoom"))
     cdf, _ = P.view_frames(prod, geo, crop, "production", year, "Current Year", None, True, None)
     st.session_state["_il_geo"] = geo
