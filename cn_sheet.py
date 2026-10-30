@@ -199,7 +199,7 @@ def _cached_bids():
 
     @st.cache_data(ttl=300, show_spinner="Reading the rail bid archive…")
     def go():
-        return RD.get_all("manual")
+        return [r for src in RD.SOURCES for r in RD.get_all(src)]       # manual + palmetto, as the tracker's Rail FOB tab reads
     return go()
 
 

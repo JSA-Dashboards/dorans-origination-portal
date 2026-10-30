@@ -153,10 +153,5 @@ def render() -> None:
 
 
 def _cached_bids():
-    import streamlit as st
-    import rail_data as RD
-
-    @st.cache_data(ttl=300)
-    def go():
-        return RD.get_all("manual")
-    return go()
+    import cn_sheet
+    return cn_sheet._cached_bids()
