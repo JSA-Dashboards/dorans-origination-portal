@@ -19,6 +19,35 @@ for _k in ("USE_SNOWFLAKE", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_RO
         pass
 
 st.set_page_config(page_title="Dorans Merchandising Portal", page_icon="🌽", layout="wide")
+import hashlib
+import hmac
+
+# Password gate. The repo is public, so the default password is stored only as a salted hash; set the APP_PASSWORD secret to change it without touching the code.
+_PW_HASH = "35896195271b2e3d795e5c6b7f0d791303f46f9dabffad245b76aa8bc2334c6c"
+
+
+def _password_ok(attempt: str) -> bool:
+    try:
+        secret = str(st.secrets.get("APP_PASSWORD", "") or "")
+    except Exception:
+        secret = ""
+    if secret:
+        return hmac.compare_digest(attempt.encode(), secret.encode())
+    return hmac.compare_digest(hashlib.sha256(("dorans-portal:" + attempt).encode()).hexdigest(), _PW_HASH)
+
+
+if not st.session_state.get("_authed"):
+    st.markdown("<h2 style='text-align:center;margin-top:60px'>Dorans Merchandising Portal</h2>", unsafe_allow_html=True)
+    _l, _m, _r = st.columns([1, 1, 1])
+    with _m:
+        _pw = st.text_input("Password", type="password", key="_pw_input")
+        if _pw:
+            if _password_ok(_pw):
+                st.session_state["_authed"] = True
+                st.rerun()
+            st.error("That password isn't right.")
+    st.stop()
+
 st.markdown("""<style>
 html, body, [class*="css"], h1, h2, h3, h4 { font-family: "Source Sans Pro", system-ui, sans-serif; }
 .dash-header { text-align:center; padding:10px 0 12px; border-bottom:3px solid #0693e3; margin-bottom:14px; }
