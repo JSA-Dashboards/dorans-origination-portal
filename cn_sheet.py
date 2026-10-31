@@ -73,11 +73,22 @@ def sheet_rows(rows, origins, size_source):
     return sorted(pick, key=lambda r: (r["state"], r["origin"], order.index(r["tier"])))
 
 
-def dorans_fob_by_month(bm: dict, commodity: str, fsc_window: dict, today: date, size="Large", source="Railroad", tier="25-49 cars") -> dict:
+REF_NAME_25 = "CN 25's"
+REF_25 = ("THOMASBORO", "IL", "25-49 cars")     # the CN 25's bid is the 25-49 car tariff tier (CN note 1); Thomasboro is its listed IL origin (Kolten: Dorans is about +4c to Thomasboro)
+
+
+def ref_row(rows, market):
+    """The tariff row a market's bid is FOB: Thomasboro (25-49 cars) for the CN 25's, Champaign (105+ cars) for the 105s."""
+    if market == "CN 25's":
+        return next((r for r in rows if (r["origin"], r["state"], r["tier"]) == REF_25), None)
+    return champaign_row(rows)
+
+
+def dorans_fob_by_month(bm: dict, commodity: str, fsc_window: dict, today: date, size="Large", source="Railroad", tier="25-49 cars", ref=None) -> dict:
     """{month: (cents/bu, futures symbol)} for a CN bid strip {month: (bid, symbol)} FOB Champaign, carried to Dorans on its own tariff tier:
-    bid + freight(Champaign, 105+ cars) - freight(Dorans, tier). The summary's FOB Dorans view for CN 25's."""
+    bid + freight(reference origin) - freight(Dorans, tier); the reference is Champaign 105+ by default, Thomasboro 25-49 for the CN 25's (ref="CN 25's"). No truck freight."""
     rows = FD.load_cn()
-    champ = champaign_row(rows)
+    champ = ref_row(rows, ref) if isinstance(ref, str) else (ref or champaign_row(rows))
     dor = next((r for r in rows if (r["origin"], r["state"], r["tier"]) == ("DORANS", "IL", tier)), None)
     if champ is None or dor is None:
         return {}
@@ -175,10 +186,6 @@ def render() -> None:
     except Exception as e:
         st.error(f"Couldn't read the rail bid archive: {e}")
         return
-    champ = champaign_row(rows)
-    if champ is None:
-        st.error("The tariff has no Champaign, IL 105+ car rate to carry the bid from.")
-        return
     weekly = _diesel()
     win = RF.window("CN", weekly, date.today()) if fsc_on else {}
     as_ofs, shown = [], False
@@ -189,12 +196,16 @@ def render() -> None:
         if not periods:
             st.info(f"No {mkt} bids posted yet.")
             continue
+        champ = ref_row(rows, mkt)
+        if champ is None:
+            st.error(f"The tariff has no {'Thomasboro 25-49 car' if mkt == REF_NAME_25 else 'Champaign, IL 105+ car'} rate to carry the {mkt} bid from.")
+            continue
         shown = True
         as_ofs.append(f"{mkt} {as_of}")
         uplift, fsc = uplift_and_fsc(periods, win, date.today())
         hdr = "".join(f"<th>{p}<br><span style='font-weight:400;text-transform:none'>{cells[p].get('futures') or ''}</span></th>" for p in periods)
         html = [CSS, '<div class="wrap"><table class="sheet"><tbody>', f'<tr><th class="l">Origin · tier</th>{hdr}</tr>']
-        html.append(f'<tr class="ref"><td class="lbl">{mkt} bid <span class="sub">(FOB Champaign)</span></td>'
+        html.append(f'<tr class="ref"><td class="lbl">{mkt} bid <span class="sub">(FOB {champ["origin"].title()})</span></td>'
                     + "".join(f'<td>{cells[p]["bid"]:+.0f}</td>' for p in periods) + "</tr>")
         for r in sheet_rows(rows, origins, (size, source)):
             vals = [fob(cells[p]["bid"], champ, r, size, field, commodity, month_of(p), fsc, uplift, fsc_on) for p in periods]
@@ -209,7 +220,7 @@ def render() -> None:
     miles = [f"{o.title()} {CM.miles_to_gulf(o, s)[0]:,.0f}" for o, s in origins if CM.miles_to_gulf(o, s)[0]]
     st.caption(f"Bids as of {as_of} (cents vs the futures month shown). {size} car ({FD.CN_BU_PER_CAR[commodity][size]:,} bu), "
                f"{source.lower()}-supplied. Rail miles to the Gulf (estimated): {', '.join(miles) or '—'}. "
-               "A package (JFM, AMJJ ...) is split across its months with a 2 cent a month carry; a month's own bid always wins. A tier below 105+ cars pays more freight, so a Dorans row sits below the Champaign bid by that difference plus its extra miles. The CN 25's bid is taken as FOB Champaign like the 105s (to confirm).")
+               "A package (JFM, AMJJ ...) is split across its months with a 2 cent a month carry; a month's own bid always wins. A tier below 105+ cars pays more freight, so a Dorans row sits below the Champaign bid by that difference plus its extra miles. The CN 25's bid is the 25-49 car tier and is carried from Thomasboro (to confirm); the 105s bids from Champaign. No truck freight in any of these.")
 
 
 # cached readers (Streamlit's cache sits here so the pure functions above import without Streamlit)

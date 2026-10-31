@@ -256,10 +256,61 @@ def cn_destination() -> tuple:
             return {}, "CN 25's has no bids posted yet."
         bm = {x["m"]: (x["bid"], x["futures"]) for x in cn_sheet.month_bids(cells)}      # packages split into months with the carry
         win = RF.window("CN", cn_sheet._diesel(), date.today())
-        fob_bm = cn_sheet.dorans_fob_by_month(bm, "Corn", win, date.today())
+        fob_bm = cn_sheet.dorans_fob_by_month(bm, "Corn", win, date.today(), ref="CN 25's")
         return {CN25: (str(d), bm, fob_bm)}, ""
     except Exception as e:
         return {}, f"CN 25's couldn't be read ({e})."
+
+
+def spread_matrix(tr: dict, today: date) -> tuple:
+    """(truck table rows, rail table rows) - the spreads the FOB Dorans view applies, nothing else.
+    Truck: per destination tab and commodity, the cheapest carrier's cents/bu from Dorans (trucking.json; subtracted from that buyer's delivered bid).
+    Rail: cents/bu to ADD to a CN bid to get FOB Dorans, by delivery month - freight(reference origin) less freight(Dorans, 25-49 cars), tariff at the month's USDA
+    level plus the CN fuel surcharge on the estimated rail miles; split into the tariff part and the fuel part. No truck freight in a rail value."""
+    truck = []
+    for tab in sorted(tr["tab_destination"]):
+        r = {"Destination": tab, "Trucked to": tr["tab_destination"][tab]}
+        for crop in ("Corn", "Soybeans"):
+            o = truck_options(tr, tab, crop)
+            r[f"{crop} (¢/bu)"] = o[0][1] if o else None
+            r[f"{crop} carrier"] = o[0][0] if o else ""
+        truck.append(r)
+    rail = []
+    try:
+        import cn_sheet as S
+        import freight_data as FD
+        import rail_fsc as RF
+        rows = FD.load_cn()
+        dor = next((r for r in rows if (r["origin"], r["state"], r["tier"]) == ("DORANS", "IL", "25-49 cars")), None)
+        win = RF.window("CN", S._diesel(), today)
+        months = []
+        y, m = today.year, today.month
+        for _ in range(9):
+            months.append((y, m))
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        names = [PER.MONTHS[m - 1] for _, m in months]
+        up, fsc = S.uplift_and_fsc(names, win, today)
+        field = FD.CN_RATE_FIELD[("Large", "Railroad")]
+        refs = [("Thomasboro, 25-49 cars", S.ref_row(rows, "CN 25's"), "CN 25's bid"), ("Champaign, 105+ cars", S.champaign_row(rows), "CN 105s bid")]
+        for label, ref, bid in refs:
+            if ref is None or dor is None:
+                continue
+            row = {"From (bid is FOB)": label, "Applies to": bid, "Rail miles to Gulf, ref / Dorans": f"{S.CM.miles_to_gulf(ref['origin'], ref['state'])[0]:,.0f} / {S.CM.miles_to_gulf('DORANS', 'IL')[0]:,.0f}"}
+            for nm in names:
+                mo = S.month_of(nm)
+                a = S.freight_cpb(ref, "Large", field, "Corn", mo, fsc, up, True)
+                b = S.freight_cpb(dor, "Large", field, "Corn", mo, fsc, up, True)
+                row[nm] = None if a is None or b is None else a - b
+            tar = None
+            try:
+                tar = S.freight_cpb(ref, "Large", field, "Corn", S.month_of(names[0]), fsc, up, False) - S.freight_cpb(dor, "Large", field, "Corn", S.month_of(names[0]), fsc, up, False)
+            except Exception:
+                pass
+            row["of which tariff only"] = tar
+            rail.append(row)
+    except Exception as e:
+        rail.append({"From (bid is FOB)": f"rail spreads unavailable ({e})"})
+    return truck, rail
 
 
 def render_summary(hist: dict, tr: dict) -> None:
@@ -282,12 +333,21 @@ def render_summary(hist: dict, tr: dict) -> None:
         st.info("Pick at least one destination." if not chosen else "None of the picked destinations has a trucking rate from Dorans.")
         return
     st.markdown(summary_html(rows, cols, today), unsafe_allow_html=True)
+    with st.expander("Spread matrix: what the FOB Dorans view applies", expanded=False):
+        import pandas as pd
+        trk, rl = spread_matrix(tr, today)
+        st.markdown("**Truck, cents/bu from Dorans** (subtracted from the buyer's delivered bid; your trucking sheet, cheapest carrier per destination)")
+        st.dataframe(pd.DataFrame(trk), hide_index=True, use_container_width=True,
+                     column_config={"Corn (¢/bu)": st.column_config.NumberColumn(format="%.0f"), "Soybeans (¢/bu)": st.column_config.NumberColumn(format="%.0f")})
+        st.markdown("**Rail, cents/bu added to a CN bid** to reach FOB Dorans (reference origin's freight less Dorans' freight, 25-49 car tariff, large car, fuel surcharge included; no truck freight)")
+        st.dataframe(pd.DataFrame(rl), hide_index=True, use_container_width=True,
+                     column_config={c: st.column_config.NumberColumn(format="%+.1f") for c in (rl[0] if rl else {}) if c not in ("From (bid is FOB)", "Applies to", "Rail miles to Gulf, ref / Dorans")})
     st.caption(("Basis in cents against the futures month shown under each bid (each buyer quotes its own month, so read down a column more than across). "
                 if view == "Delivered bids" else
                 "Basis less the cheapest truck rate from Dorans, cents/bu; the futures month is the buyer's. ") +
                "Blue = the best bid in that delivery month. A month with a full bid uses it; with none, the FH / LH midpoint. Faded = last posted more than 5 days ago."
                + (f" No trucking rate on the sheet for: {', '.join(skipped)}." if skipped else "")
-               + (" CN 25's is a rail bid: its FOB Dorans = the bid (taken as FOB Champaign, like the 105s) + CN freight from Champaign (105+ cars) less CN freight from Dorans on its 25-49 car tariff, with the fuel surcharge." if "CN 25's (rail)" in [c['label'] for c in cols] else "")
+               + (" CN 25's is a rail bid: its FOB Dorans = the bid (the 25-49 car tier, taken as FOB Thomasboro) + CN freight from Thomasboro less CN freight from Dorans, both on the 25-49 car tariff, with the fuel surcharge. No truck freight is involved in a rail value." if "CN 25's (rail)" in [c['label'] for c in cols] else "")
                + (f" {cn_note}" if cn_note else ""))
 
 
