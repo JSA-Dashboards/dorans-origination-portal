@@ -39,12 +39,12 @@ def freight_cpb(row, size, field, commodity, month, fsc_by_month, uplift_by_mont
     return FD.cn_freight_cpb(row[field], size, commodity, extra)
 
 
-def fob(bid, champ_row, row, size, field, commodity, month, fsc_by_month, uplift_by_month, fsc_on=True):
+def fob(bid, champ_row, row, size, field, commodity, month, fsc_by_month, uplift_by_month, fsc_on=True, miles_over=None):
     """bid (cents vs the futures tag, FOB Champaign) carried to `row`: bid + freight(Champaign) - freight(row)."""
     if bid is None:
         return None
     fc = freight_cpb(champ_row, size, field, commodity, month, fsc_by_month, uplift_by_month, fsc_on)
-    fo = freight_cpb(row, size, field, commodity, month, fsc_by_month, uplift_by_month, fsc_on)
+    fo = freight_cpb(row, size, field, commodity, month, fsc_by_month, uplift_by_month, fsc_on, miles_over)
     return None if fc is None or fo is None else bid + fc - fo
 
 
@@ -207,7 +207,14 @@ def render() -> None:
         html = [CSS, '<div class="wrap"><table class="sheet"><tbody>', f'<tr><th class="l">Origin · tier</th>{hdr}</tr>']
         html.append(f'<tr class="ref"><td class="lbl">{mkt} bid <span class="sub">(FOB {champ["origin"].title()})</span></td>'
                     + "".join(f'<td>{cells[p]["bid"]:+.0f}</td>' for p in periods) + "</tr>")
+        est105 = mkt != REF_NAME_25
         for r in sheet_rows(rows, origins, (size, source)):
+            if est105 and r["origin"] == "DORANS":
+                # Dorans has no 105+ tariff and a 105-car bid is for 105-car blocks: its row is the 105+ rate it would pay, i.e. Champaign's tariff on Dorans' own (shorter) rail miles
+                dm = CM.miles_to_gulf("DORANS", "IL")[0]
+                vals = [fob(cells[p]["bid"], champ, champ, size, field, commodity, month_of(p), fsc, uplift, fsc_on, {("CHAMPAIGN", "IL"): dm}) for p in periods]
+                html.append(f'<tr><td class="lbl">Dorans, IL <span class="fut-sub sub">105+ cars (est.)</span></td>' + "".join(_cell(v) for v in vals) + "</tr>")
+                continue
             vals = [fob(cells[p]["bid"], champ, r, size, field, commodity, month_of(p), fsc, uplift, fsc_on) for p in periods]
             html.append(f'<tr><td class="lbl">{r["origin"].title()}, {r["state"]} <span class="fut-sub sub">{r["tier"]}</span></td>'
                         + "".join(_cell(v) for v in vals) + "</tr>")
@@ -220,7 +227,7 @@ def render() -> None:
     miles = [f"{o.title()} {CM.miles_to_gulf(o, s)[0]:,.0f}" for o, s in origins if CM.miles_to_gulf(o, s)[0]]
     st.caption(f"Bids as of {as_of} (cents vs the futures month shown). {size} car ({FD.CN_BU_PER_CAR[commodity][size]:,} bu), "
                f"{source.lower()}-supplied. Rail miles to the Gulf (estimated): {', '.join(miles) or '—'}. "
-               "A package (JFM, AMJJ ...) is split across its months with a 2 cent a month carry; a month's own bid always wins. A tier below 105+ cars pays more freight, so a Dorans row sits below the Champaign bid by that difference plus its extra miles. The CN 25's bid is the 25-49 car tier and is carried from Thomasboro (to confirm); the 105s bids from Champaign. No truck freight in any of these.")
+               "A package (JFM, AMJJ ...) is split across its months with a 2 cent a month carry; a month's own bid always wins. A tier below 105+ cars pays more freight, so a Dorans row sits below the Champaign bid by that difference plus its extra miles. The CN 25's bid is the 25-49 car tier and is carried from Thomasboro (to confirm); the 105s bids from Champaign. On the 105s table Dorans is the 105+ car rate it would pay (Champaign tariff on Dorans' shorter miles), not its 25-49 car rate. No truck freight in any of these.")
 
 
 # cached readers (Streamlit's cache sits here so the pure functions above import without Streamlit)

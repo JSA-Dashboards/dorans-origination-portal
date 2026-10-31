@@ -291,19 +291,22 @@ def spread_matrix(tr: dict, today: date) -> tuple:
         names = [PER.MONTHS[m - 1] for _, m in months]
         up, fsc = S.uplift_and_fsc(names, win, today)
         field = FD.CN_RATE_FIELD[("Large", "Railroad")]
-        refs = [("Thomasboro, 25-49 cars", S.ref_row(rows, "CN 25's"), "CN 25's bid"), ("Champaign, 105+ cars", S.champaign_row(rows), "CN 105s bid")]
+        refs = [("Thomasboro, 25-49 cars", S.ref_row(rows, "CN 25's"), "CN 25's bid"), ("Champaign, 105+ cars (Dorans at the 105+ rate it would pay)", S.champaign_row(rows), "CN 105s bid")]
         for label, ref, bid in refs:
             if ref is None or dor is None:
                 continue
             row = {"From (bid is FOB)": label, "Applies to": bid, "Rail miles to Gulf, ref / Dorans": f"{S.CM.miles_to_gulf(ref['origin'], ref['state'])[0]:,.0f} / {S.CM.miles_to_gulf('DORANS', 'IL')[0]:,.0f}"}
+            is105 = ref["tier"].startswith("105")
+            dmi = {("CHAMPAIGN", "IL"): S.CM.miles_to_gulf("DORANS", "IL")[0]} if is105 else None
+            dref = ref if is105 else dor                       # a 105 bid: Dorans at the 105+ rate it would pay (Champaign tariff, Dorans' miles)
             for nm in names:
                 mo = S.month_of(nm)
                 a = S.freight_cpb(ref, "Large", field, "Corn", mo, fsc, up, True)
-                b = S.freight_cpb(dor, "Large", field, "Corn", mo, fsc, up, True)
+                b = S.freight_cpb(dref, "Large", field, "Corn", mo, fsc, up, True, dmi)
                 row[nm] = None if a is None or b is None else a - b
             tar = None
             try:
-                tar = S.freight_cpb(ref, "Large", field, "Corn", S.month_of(names[0]), fsc, up, False) - S.freight_cpb(dor, "Large", field, "Corn", S.month_of(names[0]), fsc, up, False)
+                tar = S.freight_cpb(ref, "Large", field, "Corn", S.month_of(names[0]), fsc, up, False) - S.freight_cpb(dref, "Large", field, "Corn", S.month_of(names[0]), fsc, up, False)
             except Exception:
                 pass
             row["of which tariff only"] = tar
