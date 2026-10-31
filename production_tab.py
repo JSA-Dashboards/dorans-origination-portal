@@ -80,7 +80,7 @@ def render() -> None:
     done = P.years_of(prod, crop)
     est_year = P.estimate_year(prod, crop)
     year_opts = ([f"{est_year} (forecast)"] if est_year else []) + [str(y) for y in reversed(done)]
-    ysel = c2.selectbox("Year", year_opts, index=1 if est_year else 0, key="il_year")
+    ysel = c2.selectbox("Year", year_opts, index=0, key="il_year")
     year = int(ysel.split()[0])
     c3.selectbox("State Drill-Down", ["IL  —  Illinois"], key="il_state", disabled=True)
     with c4:

@@ -42,7 +42,7 @@ def render() -> None:
     c1, c2, c3, c4 = st.columns([1.3, 1.5, 1.2, 1.2])
     layer = c1.selectbox("Production layer", ["Corn", "Soybeans", "Corn + soybeans", "None"], key="comp_under")
     yopts = [f"{last} (latest)", f"5-year average ({last - 4}-{last})"] + ([f"{est} (forecast)"] if est else [])
-    ysel = c2.selectbox("Production year", yopts, key="comp_year")
+    ysel = c2.selectbox("Production year", yopts, index=len(yopts) - 1 if est else 0, key="comp_year")
     zoom = c3.radio("Map extent", ["Illinois", "Dorans area"], horizontal=True, key="comp_extent")
     extent = None
     if zoom == "Dorans area":
@@ -97,7 +97,7 @@ def _draw(d, plants, prod, geo, last, est) -> None:
     c1, c2, c3, c4 = st.columns([1.1, 1.5, 1.2, 1.2])
     crop = c1.radio("Crop", ["Corn", "Soybeans"], horizontal=True, key="comp_dr_crop")
     yopts = ([f"{est} (forecast)"] if est else []) + [str(y) for y in range(last, last - 5, -1)]
-    ysel = c2.selectbox("Production year", yopts, index=1 if est else 0, key="comp_dr_year")
+    ysel = c2.selectbox("Production year", yopts, index=0, key="comp_dr_year")
     year = int(ysel.split()[0])
     extent = None
     if c3.radio("Map extent", ["Illinois", "Dorans area"], index=1, horizontal=True, key="comp_dr_extent") == "Dorans area":
