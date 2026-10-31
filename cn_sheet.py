@@ -92,6 +92,25 @@ def dorans_fob_by_month(bm: dict, commodity: str, fsc_window: dict, today: date,
     return out
 
 
+def month_bids(cells: dict, today: date | None = None) -> list:
+    """One bid per delivery month from a posting's cells {period label: row}, the tracker's rule (forward_month.rail_forward): a month's own full bid is the month
+    (FH / LH midpoint when only the halves are posted); a package ('JFM', 'AMJJ', 'Nov-Jul') fills the months nothing of their own names, spread 2 cents a month
+    around its centre so the months average back to the package bid (JFM +19 -> Jan 17 / Feb 19 / Mar 21). -> [{'p': 'Nov', 'm': 11, 'bid', 'futures'}] from today's month on."""
+    import forward_month as FM
+    items = [(p, c.get("bid")) for p, c in cells.items() if c.get("bid") is not None and not FM.is_spread_note(p)]
+    fwd = FM.rail_forward(items)
+    fut = {}
+    for pass_own in (True, False):                      # a month's own quote names its futures month; a package only fills a month with none
+        for p, c in cells.items():
+            kind, months = FM.label_info(p)
+            if not c.get("futures") or not months or (len(months) == 1) != pass_own:
+                continue
+            for m in months:
+                fut.setdefault(m, c["futures"])
+    t = (today or date.today()).month
+    return [{"p": FM.ABBR[m], "m": m, "bid": v, "futures": fut.get(m)} for m, v in sorted(fwd.items(), key=lambda kv: (kv[0] - t) % 12)]
+
+
 def periods_name(m: int) -> str:
     import calendar
     return calendar.month_abbr[m]
@@ -165,7 +184,8 @@ def render() -> None:
     as_ofs, shown = [], False
     for mkt in BID_MARKETS[commodity]:
         cells, as_of = _latest_cells(all_rows, mkt)
-        periods = [p for p in _ordered(cells) if cells[p].get("bid") is not None and month_of(p)]
+        cells = {x["p"]: x for x in month_bids(cells)}      # one value per delivery month; packages split out with the carry
+        periods = [p for p in cells if month_of(p)]
         if not periods:
             st.info(f"No {mkt} bids posted yet.")
             continue
@@ -189,7 +209,7 @@ def render() -> None:
     miles = [f"{o.title()} {CM.miles_to_gulf(o, s)[0]:,.0f}" for o, s in origins if CM.miles_to_gulf(o, s)[0]]
     st.caption(f"Bids as of {as_of} (cents vs the futures month shown). {size} car ({FD.CN_BU_PER_CAR[commodity][size]:,} bu), "
                f"{source.lower()}-supplied. Rail miles to the Gulf (estimated): {', '.join(miles) or '—'}. "
-               "A tier below 105+ cars pays more freight, so a Dorans row sits below the Champaign bid by that difference plus its extra miles. The CN 25's bid is taken as FOB Champaign like the 105s (to confirm).")
+               "A package (JFM, AMJJ ...) is split across its months with a 2 cent a month carry; a month's own bid always wins. A tier below 105+ cars pays more freight, so a Dorans row sits below the Champaign bid by that difference plus its extra miles. The CN 25's bid is taken as FOB Champaign like the 105s (to confirm).")
 
 
 # cached readers (Streamlit's cache sits here so the pure functions above import without Streamlit)

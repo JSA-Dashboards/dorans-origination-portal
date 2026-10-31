@@ -4,7 +4,9 @@
 The bids come from the Basis Tracker's rail archive (`rail_fob`, read through rail_data), so what is charted is what the tracker's views chart.
 Bucketing and the one-value-per-month rule are periods.py (the tracker's `_seasonal_bucket` and forward_month). Pure functions first; drawing last.
 """
+import base64
 from datetime import date
+from pathlib import Path
 
 import periods as PER
 
@@ -91,103 +93,264 @@ def week_label(w: int) -> str:
     return d.strftime("%b %d").replace(" 0", " ")
 
 
-# ── drawing ──────────────────────────────────────────────────────────────────────────────────────────────────────
-# The Basis Tracker's Rail FOB seasonal chart: month labels on the x axis (the marketing year starts Sep = week 1), gray true-range band, faded older
-# years, last year blue, the Olympic average amber dashed, this year thick black, the latest rundown as a dashed black forward curve, futures-month rules.
-MON_WK = {9: 1, 10: 5, 11: 10, 12: 14, 1: 18, 2: 23, 3: 27, 4: 31, 5: 36, 6: 40, 7: 45, 8: 49}
-MON_LAB = {1: "Sep", 5: "Oct", 10: "Nov", 14: "Dec", 18: "Jan", 23: "Feb", 27: "Mar", 31: "Apr", 36: "May", 40: "Jun", 45: "Jul", 49: "Aug"}
-FUT_RULES = {13: "Z", 27: "H", 35: "K", 44: "N"}
-OLD_COLORS = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac"]
+# ── drawing: the Basis Tracker's Rail FOB seasonal chart (app.py `_rail_seasonal`), ported line for line to Altair ───────────────────────────────────────
+# Same data prep (a month's day-bids become ONE value, derived Spot, weekly means), same layers and colours, best-fit y-axis, years picker, Olympic average,
+# true-range band, forward curve with packages spread by the carry, futures-month rules, logo watermark, title block, caption and PNG download.
+_CHART_PAD = {"left": 6, "right": 22, "top": 8, "bottom": 6}
+_YFIT = {"75%": (0.125, 0.875), "90%": (0.05, 0.95), "95%": (0.025, 0.975), "Full": None}
+_YFIT_DEFAULT = "90%"
+_LOGO = Path(__file__).parent / "assets" / "50 Year logo JSA.png"
+_MON_WK = {"Sep": 1, "Oct": 5, "Nov": 10, "Dec": 14, "Jan": 18, "Feb": 23, "Mar": 27, "Apr": 31, "May": 36, "Jun": 40, "Jul": 45, "Aug": 49}
+_CARRY = 2.0        # cents a month a package is spread across the months it names
 
 
-def forward_curve(rows: list, market: str) -> dict:
-    """{marketing week: bid} of the market's latest posting, one value per delivery month (the tracker's forward-month rule)."""
-    sel = [r for r in rows if r["market"] == market and r.get("bid") is not None and not _spread_note(r["period"])]
-    if not sel:
-        return {}
-    d = max(r["date"] for r in sel)
-    bm = PER.by_month([[r["period"], r.get("futures"), r["bid"]] for r in sel if r["date"] == d])
-    return {MON_WK[m]: v[0] for m, v in bm.items() if m in MON_WK}
+def _yfit_scale(values, fit=_YFIT_DEFAULT, pad_frac=0.08):
+    """alt.Scale zoomed to the central `fit` % of `values`. Needs >=8 points to clamp."""
+    import altair as _alt
+    import pandas as _pd
+    vals = [v for v in values if v is not None]
+    pct = _YFIT.get(fit)
+    if pct is None or len(vals) < 8:
+        return _alt.Scale(zero=False)
+    q = _pd.Series(vals).quantile(list(pct))
+    lo, hi = float(q.iloc[0]), float(q.iloc[1])
+    if hi <= lo:
+        return _alt.Scale(zero=False)
+    pad = (hi - lo) * pad_frac
+    return _alt.Scale(zero=False, domain=[round(lo - pad), round(hi + pad)], clamp=True)
+
+
+def _chart_png(chart, width: int = 1100, height: int = 560, scale: float = 2.0):
+    """Altair chart -> PNG bytes via vl-convert; None on failure."""
+    try:
+        import json as _json
+        import vl_convert as _vlc
+        spec = _json.dumps(chart.properties(width=width, height=height).to_dict(), default=str)
+        return _vlc.vegalite_to_png(spec, scale=scale)
+    except Exception:
+        return None
 
 
 def render(all_rows: list) -> None:
-    import plotly.graph_objects as go
+    import altair as _alt
+    import pandas as _pd
     import streamlit as st
 
-    markets = cn_markets(all_rows)
-    if not markets:
+    import forward_month as _fm
+    import seasonal_band as _sband
+
+    cn = set(cn_markets(all_rows))
+    if not cn:
         st.info("No CN corridors in the rail archive yet.")
         return
-    c1, c2 = st.columns([1.3, 1])
-    mk = c1.selectbox("Corridor", markets, key="cnseas_mkt")
-    rb = bucket_rows(all_rows, mk)
-    n = {}
-    for b, d, _ in rb:
-        n.setdefault(b, set()).add(d)
-    opts = [p for p in PER.SEAS_PERIODS if len(n.get(p, ())) >= 3]
-    if not opts:
-        st.caption(f"{mk} has no shipping period with enough postings to chart yet.")
+    _SEAS_MON = PER.MONTHS
+    _rows = []
+    _spot_seen = set()                     # (market, date) with an explicit "Spot" row
+    _mdate = {}                            # (market, date, commodity) -> [(period_order, bid)]
+    _mquotes = {}                          # (market, month, date, commodity) -> [(kind, bid)]
+    _fwd_cells = {}                        # (market, date) -> [(period, bid)] for the forward curve
+    for _r in all_rows:
+        if _r["market"] not in cn or _r.get("bid") is None or _fm.is_spread_note(_r["period"]):
+            continue                      # a spread note's number is the spread, not a period's basis
+        _b = PER.seasonal_bucket(_r["period"])
+        _rc = _r.get("commodity") or "Corn"
+        if _b in _SEAS_MON:             # a month: the day's full / FH / LH bids become ONE value below
+            _mquotes.setdefault((_r["market"], _b, _r["date"], _rc), []).append((_fm.kind_of(_r["period"]), _r["bid"]))
+        elif _b:                        # None = not a tracked seasonal period
+            _rows.append((_r["market"], _b, _r["date"], _r["bid"], _rc, _r.get("bid_raw") == "est"))
+            if _b == "Spot":
+                _spot_seen.add((_r["market"], _r["date"]))
+        if _b and _b != "Spot":         # the forward curve reads the posted label (a tracked package by its bucket name)
+            _fwd_cells.setdefault((_r["market"], _r["date"]), []).append((_r["period"] if _b in _SEAS_MON else _b, _r["bid"]))
+        _po = _r.get("period_order")
+        _mdate.setdefault((_r["market"], _r["date"], _rc), []).append((_po if _po is not None else 99, _r["bid"]))
+    # A month posted several ways on one day is ONE value (forward_month): its full-month bid; with none, the midpoint of FH and LH when both are posted, else the lone half.
+    for (_m, _b, _d, _c), _qs in _mquotes.items():
+        _mv = _fm.month_value(_qs)
+        if _mv is not None:
+            _rows.append((_m, _b, _d, _mv, _c, False))
+    # Derived Spot = nearest-period bid, added only where no explicit "Spot" exists.
+    for (_m, _d, _c), _lst in _mdate.items():
+        if (_m, _d) in _spot_seen:
+            continue
+        _lst.sort(key=lambda t: t[0])
+        _sb = next((b for _o, b in _lst if b is not None), None)
+        if _sb is not None:
+            _rows.append((_m, "Spot", _d, _sb, _c, False))
+    if not _rows:
+        st.caption("No rail history archived yet — the seasonal chart fills in as postings are saved.")
         return
-    pd_sel = c2.selectbox("Shipping period", opts, format_func=lambda p: f"{p}  ({len(n[p])})", key="cnseas_per")
-    pts = [(d, v) for b, d, v in rb if b == pd_sel]
-    by_year = weekly(pts)
-    cur = max(by_year)
-    today = date.today()
-    today_my = today.year if today.month >= 9 else today.year - 1
-    window = [y for y in range(today_my - 5, today_my) if y in by_year]
-    band = olympic_band(by_year, window)
-    lab = lambda y: f"{y}/{str(y + 1)[-2:]}"
-    avg_lbl = f"{len(window)}-yr Olympic avg" if len(window) >= 4 else f"{len(window)}-yr avg"
+    _df = _pd.DataFrame(_rows, columns=["Market", "Period", "Date", "Bid", "Commodity", "Est"])
 
-    fig = go.Figure()
-    for w, code in FUT_RULES.items():
-        fig.add_vline(x=w, line=dict(color="#cbd5e1", width=1.5))
-        fig.add_annotation(x=w, y=1, yref="paper", text=code, showarrow=False, yanchor="top", font=dict(size=12, color="#94a3b8"))
-    fig.add_hline(y=0, line=dict(color="#94a3b8", width=1, dash="dash"))
-    if band:
-        ws = sorted(band)
-        fig.add_trace(go.Scatter(x=ws + ws[::-1], y=[band[w][2] for w in ws] + [band[w][1] for w in ws[::-1]], fill="toself",
-                                 fillcolor="rgba(156,163,175,0.22)", line=dict(width=0), hoverinfo="skip", name=f"{len(window)}-yr range"))
-    old = [y for y in by_year if y < cur - 1]
-    for i, y in enumerate(old):
-        wks = by_year[y]
-        fig.add_trace(go.Scatter(x=list(wks), y=list(wks.values()), mode="lines", name=lab(y), opacity=0.5,
-                                 line=dict(width=1.3, color=OLD_COLORS[i % len(OLD_COLORS)]), hovertemplate=lab(y) + " wk %{x}: %{y:.1f}¢<extra></extra>"))
-    if cur - 1 in by_year:
-        wks = by_year[cur - 1]
-        fig.add_trace(go.Scatter(x=list(wks), y=list(wks.values()), mode="lines+text", name=lab(cur - 1), line=dict(width=4, color="#2563eb"),
-                                 text=[""] * (len(wks) - 1) + [lab(cur - 1)], textposition="middle right", textfont=dict(color="#2563eb", size=10),
-                                 hovertemplate=lab(cur - 1) + " wk %{x}: %{y:.1f}¢<extra></extra>"))
-    if band:
-        ws = sorted(band)
-        fig.add_trace(go.Scatter(x=ws, y=[band[w][0] for w in ws], mode="lines+text", name=avg_lbl, line=dict(color="#d97706", width=3, dash="dash"),
-                                 text=[""] * (len(ws) - 1) + [avg_lbl], textposition="middle right", textfont=dict(color="#d97706", size=10),
-                                 hovertemplate=avg_lbl + " wk %{x}: %{y:.1f}¢<extra></extra>"))
-    fwd = forward_curve(all_rows, mk)
-    if fwd:
-        twk = min(52, max(1, (today - date(today_my, 9, 1)).days // 7 + 1))
-        for seg, nm in (({w: v for w, v in fwd.items() if w >= twk}, "Forward curve"), ({w: v for w, v in fwd.items() if w < twk}, "Forward (next marketing year)")):
-            if seg:
-                ws = sorted(seg)
-                fig.add_trace(go.Scatter(x=ws, y=[seg[w] for w in ws], mode="lines+markers", name=nm, line=dict(color="#000", width=2, dash="dash"),
-                                         marker=dict(size=7, color="#000"), hovertemplate="Fwd bid wk %{x}: %{y:.0f}¢<extra></extra>"))
-    wks = by_year[cur]
-    fig.add_trace(go.Scatter(x=list(wks), y=list(wks.values()), mode="lines+text", name=lab(cur), line=dict(width=4, color="#000"),
-                             text=[""] * (len(wks) - 1) + [lab(cur)], textposition="middle right", textfont=dict(color="#000", size=10),
-                             hovertemplate=lab(cur) + " wk %{x}: %{y:.1f}¢<extra></extra>"))
-    comm = next((r.get("commodity") for r in all_rows if r["market"] == mk and r.get("commodity")), "")
+    _mk_n = _df.groupby("Market")["Date"].nunique()
+    _mk_opts = sorted(m for m in _mk_n.index if _mk_n[m] >= 6)
+    if not _mk_opts:
+        st.caption("Not enough rail history yet to chart a season.")
+        return
+
+    _c1, _c2, _c3 = st.columns([3, 2, 5])
+    with _c1:
+        _mk = st.selectbox("Corridor", _mk_opts, key="cnseas_mkt")
+    _pv = _df[_df["Market"] == _mk]
+    _p_n = _pv.groupby("Period")["Date"].nunique()
+    # Fixed order — Spot, calendar months, then the tracked packages — rather than by frequency.
+    _p_opts = [p for p in PER.SEAS_PERIODS if _p_n.get(p, 0) >= 3]
+    if not _p_opts:
+        st.caption(f"{_mk} has no shipping period with enough postings to chart yet.")
+        return
+    with _c2:
+        _pd_sel = st.selectbox("Shipping period", _p_opts, key="cnseas_per", format_func=lambda p: f"{p}  ({_p_n[p]})")
+    with _c3:
+        st.caption("Best fit")
+        _rfit = st.radio("Best fit", list(_YFIT), index=list(_YFIT).index(_YFIT_DEFAULT), horizontal=True, key="cnseas_fit", label_visibility="collapsed",
+                         help="Zoom the y-axis to the central % of values so outlier weeks don't squash the chart. 'Full' shows the raw min/max.")
+
+    _sel = _pv[_pv["Period"] == _pd_sel][["Date", "Bid", "Est"]].copy()
+    _dts = _pd.to_datetime(_sel["Date"])
+    _yr, _mo = _dts.dt.year, _dts.dt.month
+    _sel["MktYearNum"] = _yr.where(_mo >= 9, _yr - 1)
+    _sel["MktYear"] = _sel["MktYearNum"].apply(lambda y: f"{y}/{str(y + 1)[-2:]}")
+    _sep1 = _pd.to_datetime(_sel["MktYearNum"].astype(str) + "-09-01")
+    _sel["MktWeek"] = ((_dts - _sep1).dt.days // 7 + 1).clip(1, 52)
+    _sel = (_sel.groupby(["MktYear", "MktYearNum", "MktWeek"], as_index=False).agg(Bid=("Bid", "mean"), Est=("Est", "max")))
+    _sel["Bid"] = _sel["Bid"].round(1)
+
+    _mx = int(_sel["MktYearNum"].max())
+    # Year picker — defaults to the most recent 10 marketing years; band/average stay on calendar trailing-5.
+    _all_yrs = sorted(_sel["MktYearNum"].unique(), reverse=True)
+    _default_yrs = [y for y in _all_yrs if y >= _mx - 9]
+    _yr_lab = {y: f"{y}/{str(y + 1)[-2:]}" for y in _all_yrs}
+    with _c3:
+        if len(_all_yrs) > 1:
+            _pick = st.multiselect("Years shown", _all_yrs, default=_default_yrs, format_func=lambda y: _yr_lab[y], key="cnseas_yrs")
+            _sel_yrs = sorted(_pick) if _pick else _default_yrs
+        else:
+            _sel_yrs = _all_yrs
+    _drawn = _sel[_sel["MktYearNum"].isin(_sel_yrs)]
+    _hist = _drawn[_drawn["MktYearNum"] < _mx]
+    _hist_prev = _hist[_hist["MktYearNum"] == _mx - 1]     # most recent complete year
+    _hist_old = _hist[_hist["MktYearNum"] < _mx - 1]
+    _curr = _drawn[_drawn["MktYearNum"] == _mx]
+    _curr_yr = _curr["MktYear"].iloc[0] if not _curr.empty else ""
+    _prev_yr = _hist_prev["MktYear"].iloc[0] if not _hist_prev.empty else ""
+    _old_years = sorted(_hist_old["MktYear"].unique())
+    _hist_color = _alt.Color("MktYear:N", sort=_old_years, scale=_alt.Scale(scheme="tableau10", domain=_old_years),
+                             legend=_alt.Legend(title="Mkt Year", orient="bottom", columns=6, labelFontSize=10, titleFontSize=10))
+    _PREV_CLR, _AVG_CLR = "#2563eb", "#d97706"   # hero blue / amber
+
+    # 5-yr range band + average for THIS period — the five completed crop years immediately before the CURRENT calendar marketing year.
+    # OLYMPIC AVERAGE (each week's highest and lowest year dropped); the RANGE is not trimmed: lowest to highest of every year.
+    _bw = 5
+    _rcur_my = date.today().year if date.today().month >= 9 else date.today().year - 1
+    _rwin_yrs = list(range(_rcur_my - _bw, _rcur_my))
+    _nu = _bw
+    _avg_lbl = f"{_nu}-yr Olympic avg" if _sband.is_trimmed(_nu) else f"{_nu}-yr avg"
+    _rwin = _sel[_sel["MktYearNum"].isin(_rwin_yrs)]
+    _rband = (_rwin.groupby("MktWeek")["Bid"].agg(avg=_sband.olympic_avg, lo=_sband.range_lo, hi=_sband.range_hi).reset_index())
+
+    # Forward curve = the corridor's LATEST full rundown, each delivery month placed at its week (dashed same-colour line over the historical band).
+    # One value per month (forward_month); a package bid is spread into a per-month carry that fills only the months nothing of their own names.
+    _lastdate = _pv["Date"].max()
+    _rfw = [{"MktWeek": _MON_WK[_fm.ABBR[_m]], "Bid": _v} for _m, _v in _fm.rail_forward(_fwd_cells.get((_mk, _lastdate), ()), _CARRY).items()]
+    # Today's marketing week — periods whose week has already passed this year roll to the NEXT marketing year (a separate segment starting back at the Sep side).
+    _t = date.today()
+    _tmy = _t.year if _t.month >= 9 else _t.year - 1
+    _twk = min(52, max(1, ((_t - date(_tmy, 9, 1)).days // 7) + 1))
+    _df_rfwd = _pd.DataFrame(_rfw)
+    _rfwd_cur = _rfwd_nxt = None
+    if not _df_rfwd.empty:
+        _df_rfwd = _df_rfwd.groupby("MktWeek", as_index=False)["Bid"].mean()
+        _df_rfwd["Bid"] = _df_rfwd["Bid"].round(1)
+        _rfwd_cur = _df_rfwd[_df_rfwd["MktWeek"] >= _twk].sort_values("MktWeek")
+        _rfwd_nxt = _df_rfwd[_df_rfwd["MktWeek"] < _twk].sort_values("MktWeek")
+
+    # Best-fit y-axis: clamp to the central N% of bids so outlier days don't squash the chart.
+    _ryvals = list(_drawn["Bid"]) + list(_rband["lo"]) + list(_rband["hi"])
+    if not _df_rfwd.empty:
+        _ryvals += list(_df_rfwd["Bid"])
+    _ry_scale = _yfit_scale(_ryvals, _rfit)
+    # Month references on the X axis (marketing year starts Sep = week 1).
+    _mlab = ("{1:'Sep',5:'Oct',10:'Nov',14:'Dec',18:'Jan',23:'Feb',27:'Mar',31:'Apr',36:'May',40:'Jun',45:'Jul',49:'Aug'}[datum.value]")
+    _x = _alt.X("MktWeek:Q", title=None, scale=_alt.Scale(domain=[1, 52]),
+                axis=_alt.Axis(values=[1, 5, 10, 14, 18, 23, 27, 31, 36, 40, 45, 49], labelExpr=_mlab, labelFontSize=11))
+    _y = _alt.Y("Bid:Q", title="Bid (¢)", scale=_ry_scale, axis=_alt.Axis(labelFontSize=10))
+    _tip = [_alt.Tooltip("MktYear:N", title="Mkt Year"), _alt.Tooltip("MktWeek:Q", title="Week"), _alt.Tooltip("Bid:Q", title="Bid (¢)")]
+    _H = 560
+
+    _wm = None
+    if _LOGO.exists():
+        _wm_h = int(_H * 0.50)
+        _wm = (_alt.Chart(_pd.DataFrame({"MktWeek": [26.5], "url": ["data:image/png;base64," + base64.b64encode(_LOGO.read_bytes()).decode()]}))
+               .mark_image(width=int(_wm_h * 0.93), height=_wm_h, opacity=0.20, align="center", baseline="middle")
+               .encode(x=_alt.X("MktWeek:Q"), y=_alt.value(_H // 2), url="url:N"))
+
+    _zero = (_alt.Chart(_pd.DataFrame({"MktWeek": [1, 52], "Bid": [0.0, 0.0]})).mark_line(color="#94a3b8", strokeDash=[4, 4], strokeWidth=1)
+             .encode(x=_alt.X("MktWeek:Q"), y=_alt.Y("Bid:Q")))
+    _cur_ln = _alt.Chart(_curr).mark_line(strokeWidth=4, color="#000000").encode(x=_x, y=_y, tooltip=_tip)
+    _cur_lb = (_alt.Chart(_curr.nlargest(1, "MktWeek") if not _curr.empty else _curr)
+               .mark_text(align="left", dx=6, fontSize=10, fontWeight="bold", color="#000000")
+               .encode(x=_alt.X("MktWeek:Q"), y=_alt.Y("Bid:Q"), text="MktYear:N"))
+
+    _layers = ([_wm] if _wm else []) + [_zero]
+    # 5-yr range band (gray) area, behind everything.
+    if not _rband.empty:
+        _layers.append(_alt.Chart(_rband).mark_area(color="#9ca3af", opacity=0.22)
+                       .encode(x=_alt.X("MktWeek:Q"), y=_alt.Y("lo:Q", title="Bid (¢)", scale=_ry_scale), y2="hi:Q"))
+    # Older marketing years — faded thin context lines behind the heroes.
+    if not _hist_old.empty:
+        _layers.append(_alt.Chart(_hist_old).mark_line(strokeWidth=1.3, opacity=0.45).encode(x=_x, y=_y, color=_hist_color, tooltip=_tip))
+    # Most recent COMPLETE year — HERO blue, thick, with an end-label.
+    if not _hist_prev.empty:
+        _layers.append(_alt.Chart(_hist_prev).mark_line(strokeWidth=4, color=_PREV_CLR).encode(x=_x, y=_y, tooltip=_tip))
+        _layers.append(_alt.Chart(_hist_prev.nlargest(1, "MktWeek")).mark_text(align="left", dx=6, fontSize=10, fontWeight="bold", color=_PREV_CLR)
+                       .encode(x=_alt.X("MktWeek:Q"), y=_alt.Y("Bid:Q"), text="MktYear:N"))
+    # 5-yr average — HERO amber, bold heavy-dash, drawn OVER the year lines.
+    if not _rband.empty:
+        _layers.append(_alt.Chart(_rband).mark_line(color=_AVG_CLR, strokeDash=[8, 4], strokeWidth=3)
+                       .encode(x=_alt.X("MktWeek:Q"), y=_alt.Y("avg:Q", scale=_ry_scale)))
+        _r_avg_end = _rband.nlargest(1, "MktWeek").assign(_lbl=_avg_lbl)
+        _layers.append(_alt.Chart(_r_avg_end).mark_text(align="left", dx=6, fontSize=10, fontWeight="bold", color=_AVG_CLR)
+                       .encode(x=_alt.X("MktWeek:Q"), y=_alt.Y("avg:Q", scale=_ry_scale), text="_lbl:N"))
+    # Forward curve — dashed black line of the latest rundown; the next-marketing-year stretch is its own segment so it never draws a line back across the chart.
+    _rfwd_tip = [_alt.Tooltip("MktWeek:Q", title="Week"), _alt.Tooltip("Bid:Q", title="Fwd bid (¢)", format=".0f")]
+    for _seg in (_rfwd_cur, _rfwd_nxt):
+        if _seg is not None and not _seg.empty:
+            _layers += [_alt.Chart(_seg).mark_line(strokeWidth=2, color="#000000", strokeDash=[6, 4]).encode(x=_x, y=_y),
+                        _alt.Chart(_seg).mark_point(filled=True, color="#000000", size=34).encode(x=_x, y=_y, tooltip=_rfwd_tip)]
+    # Current year — thickest black line, drawn OVER everything.
+    _layers += [_cur_ln, _cur_lb]
+    _fut = _pd.DataFrame([{"MktWeek": 13, "code": "Z"}, {"MktWeek": 27, "code": "H"}, {"MktWeek": 35, "code": "K"}, {"MktWeek": 44, "code": "N"}])
+    _layers = [_alt.Chart(_fut).mark_rule(color="#cbd5e1", strokeWidth=1.5).encode(x="MktWeek:Q"),
+               _alt.Chart(_fut).mark_text(fontSize=12, color="#94a3b8", fontWeight="bold", align="center", baseline="top")
+               .encode(x=_alt.X("MktWeek:Q"), y=_alt.value(6), text="code:N")] + _layers
+
+    _comm = _pv["Commodity"].iloc[0] if not _pv.empty else "Corn"
+    _rail_title = f"{_mk} · {_pd_sel} · {_comm}"
     st.markdown(
-        f'<div style="margin-top:8px;margin-bottom:2px;font-size:14px;color:#1e293b;font-weight:800">{mk} · {pd_sel}{" · " + comm if comm else ""}</div>'
-        '<div style="margin-bottom:4px;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.1em">Seasonal Bid — Marketing Year (Sep–Aug)'
-        f'&nbsp;&nbsp;<span style="font-weight:400;text-transform:none"><b style="color:#000">{lab(cur)} = black</b>'
-        + (f' · <b style="color:#2563eb">{lab(cur - 1)} = blue</b>' if cur - 1 in by_year else "")
-        + (f' · <b style="color:#d97706">{avg_lbl} = amber dash</b>' if band else "") + "</span></div>", unsafe_allow_html=True)
-    fig.update_layout(height=560, margin=dict(l=0, r=60, t=14, b=0), paper_bgcolor="#fff", plot_bgcolor="#fff", legend=dict(orientation="h", y=-0.08, font=dict(size=10)),
-                      yaxis=dict(title="Bid (¢)", gridcolor="#e2e8f0", zeroline=False),
-                      xaxis=dict(tickmode="array", tickvals=list(MON_LAB), ticktext=list(MON_LAB.values()), range=[1, 52], showgrid=False))
-    st.plotly_chart(fig, use_container_width=True)
-    first = min(d for d, _ in pts)
-    st.caption(f"{len(n[pd_sel])} postings · weekly average where a period was posted more than once. Black = {lab(cur)}, blue = {lab(cur - 1)}, "
-               + (f"amber dash = the Olympic average of the last {len(window)} complete years (each week's highest and lowest year dropped; under four years the plain mean) with their true range shaded gray; "
-                  if band else "the average and range appear once two complete years are archived; ")
-               + f"dashed black = the latest rundown by delivery month. The archive's CN history starts {first:%b %Y}. Source: the Basis Tracker's rail archive.")
+        '<div style="margin-top:8px;margin-bottom:2px;font-size:14px;color:#1e293b;font-weight:800;letter-spacing:.01em">' + _rail_title + '</div>'
+        '<div style="margin-bottom:4px;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.1em">'
+        'Seasonal Bid — Marketing Year (Sep–Aug)'
+        + '&nbsp;&nbsp;<span style="font-weight:400;text-transform:none">'
+        + (f'<b style="color:#000">{_curr_yr} = black</b>' if _curr_yr else '')
+        + (f'  ·  <b style="color:#2563eb">{_prev_yr} = blue</b>' if _prev_yr else '')
+        + (f'  ·  <b style="color:#d97706">{_avg_lbl} = amber dash</b>' if not _rband.empty else '')
+        + '</span></div>', unsafe_allow_html=True)
+    _rail_chart = _alt.layer(*_layers).properties(height=_H, padding=_CHART_PAD)
+    st.altair_chart(_rail_chart, use_container_width=True)
+    _rail_fname = f"cn_seasonal_{_mk}_{_pd_sel}.png".replace(" ", "_").replace("/", "-").replace(",", "").replace("'", "")
+    _rail_export = _rail_chart.properties(title=_alt.TitleParams(_rail_title, subtitle="Seasonal Bid — Marketing Year (Sep–Aug)", fontSize=15, fontWeight="bold",
+                                                               color="#1e293b", subtitleFontSize=11, subtitleColor="#64748b", anchor="start", offset=12))
+    _png = _chart_png(_rail_export, width=1100, height=_H)
+    if _png is None:
+        st.caption("PNG export unavailable")
+    else:
+        _d1, _ = st.columns([1, 4])
+        _d1.download_button("⬇️  PNG", _png, file_name=_rail_fname, mime="image/png", key=f"dl_cnseas_{_mk}_{_pd_sel}", use_container_width=True)
+    if _sband.is_trimmed(_nu):
+        _band_txt = (f"the {_nu}-yr average is Olympic (each week's highest and lowest year are dropped; a week with fewer than five years uses them all) and the gray band is the true range: "
+                     f"each week's lowest to highest of the last {_nu} completed crop years ({', '.join(f'{y}/{(y + 1) % 100:02d}' for y in _rwin_yrs)}).")
+    else:
+        _band_txt = "no completed crop year has enough weekly bids yet for an average and a gray band."
+    st.caption(f"{int(_p_n[_pd_sel])} postings · weekly average where a period was posted more than once · partial windows fold into their month "
+               f"(FH/LH/Split Oct, Oct 10-31, LH Oct/FH Nov → Oct) · a package bid (JFM, AMJJ ...) is spread across its months with a {_CARRY:g}¢ a month carry on the forward curve · "
+               + _band_txt + " Source: the Basis Tracker's rail archive.")

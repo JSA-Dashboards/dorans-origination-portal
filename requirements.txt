@@ -5,3 +5,5 @@ requests
 snowflake-connector-python>=3.7
 cryptography
 openpyxl
+altair
+vl-convert-python>=1.7

@@ -254,8 +254,7 @@ def cn_destination() -> tuple:
         cells, d = cn_sheet._latest_cells(rows, "CN 25's")
         if not cells:
             return {}, "CN 25's has no bids posted yet."
-        quotes = [[p, c.get("futures"), c.get("bid"), 0] for p, c in cells.items() if c.get("bid") is not None]
-        bm = PER.by_month(quotes)
+        bm = {x["m"]: (x["bid"], x["futures"]) for x in cn_sheet.month_bids(cells)}      # packages split into months with the carry
         win = RF.window("CN", cn_sheet._diesel(), date.today())
         fob_bm = cn_sheet.dorans_fob_by_month(bm, "Corn", win, date.today())
         return {CN25: (str(d), bm, fob_bm)}, ""

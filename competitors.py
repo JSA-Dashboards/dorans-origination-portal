@@ -121,10 +121,9 @@ def cn_front_bids() -> tuple:
         out = {}
         for m, _ in CN_MARKETS:
             cells, day = cn_sheet._latest_cells(all_rows, m)
-            ps = [p for p in cn_sheet._ordered(cells) if cells[p].get("bid") is not None]
-            if ps:
-                c = cells[ps[0]]
-                out[m] = (str(day), ps[0], c["bid"], c.get("futures"))
+            mb = cn_sheet.month_bids(cells)
+            if mb:
+                out[m] = (str(day), mb[0]["p"], mb[0]["bid"], mb[0]["futures"])
         return out, "" if out else "No CN bids posted yet."
     except Exception as e:
         return {}, f"CN bids couldn't be read ({e})."
